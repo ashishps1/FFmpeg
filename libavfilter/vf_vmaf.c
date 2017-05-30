@@ -111,22 +111,6 @@ void compute_images_mse(VMAFContext *s,
                         int w, int h, double mse[4])
 {
     int i, c;
-
-    for (c = 0; c < s->nb_components; c++) {
-        const int outw = s->planewidth[c];
-        const int outh = s->planeheight[c];
-        const uint8_t *main_line = main_data[c];
-        const uint8_t *ref_line = ref_data[c];
-        const int ref_linesize = ref_linesizes[c];
-        const int main_linesize = main_linesizes[c];
-        uint64_t m = 0;
-        for (i = 0; i < outh; i++) {
-            m += s->dsp.sse_line(main_line, ref_line, outw);
-            ref_line += ref_linesize;
-            main_line += main_linesize;
-        }
-        mse[c] = m / (double)(outw * outh);
-    }
 }
 
 static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
@@ -153,66 +137,6 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main,
     compute_images_mse(s, (const uint8_t **)main->data, main->linesize,
                           (const uint8_t **)ref->data, ref->linesize,
                           main->width, main->height, comp_mse);
-
-    for (j = 0; j < s->nb_components; j++)
-        mse += comp_mse[j] * s->planeweight[j];
-
-    s->min_mse = FFMIN(s->min_mse, mse);
-    s->max_mse = FFMAX(s->max_mse, mse);
-
-    s->mse += mse;
-    for (j = 0; j < s->nb_components; j++)
-        s->mse_comp[j] += comp_mse[j];
-    s->nb_frames++;
-
-    for (j = 0; j < s->nb_components; j++) {
-        c = s->is_rgb ? s->rgba_map[j] : j;
-        set_meta(metadata, "lavfi.vmaf.mse.", s->comps[j], comp_mse[c]);
-        set_meta(metadata, "lavfi.vmaf.vmaf.", s->comps[j], get_vmaf(comp_mse[c], 1, s->max[c]));
-    }
-    set_meta(metadata, "lavfi.vmaf.mse_avg", 0, mse);
-    set_meta(metadata, "lavfi.vmaf.vmaf_avg", 0, get_vmaf(mse, 1, s->average_max));
-
-    if (s->stats_file) {
-        if (s->stats_version == 2 && !s->stats_header_written) {
-            fprintf(s->stats_file, "vmaf_log_version:2 fields:n");
-            fprintf(s->stats_file, ",mse_avg");
-            for (j = 0; j < s->nb_components; j++) {
-                fprintf(s->stats_file, ",mse_%c", s->comps[j]);
-            }
-            fprintf(s->stats_file, ",vmaf_avg");
-            for (j = 0; j < s->nb_components; j++) {
-                fprintf(s->stats_file, ",vmaf_%c", s->comps[j]);
-            }
-            if (s->stats_add_max) {
-                fprintf(s->stats_file, ",max_avg");
-                for (j = 0; j < s->nb_components; j++) {
-                    fprintf(s->stats_file, ",max_%c", s->comps[j]);
-                }
-            }
-            fprintf(s->stats_file, "\n");
-            s->stats_header_written = 1;
-        }
-        fprintf(s->stats_file, "n:%"PRId64" mse_avg:%0.2f ", s->nb_frames, mse);
-        for (j = 0; j < s->nb_components; j++) {
-            c = s->is_rgb ? s->rgba_map[j] : j;
-            fprintf(s->stats_file, "mse_%c:%0.2f ", s->comps[j], comp_mse[c]);
-        }
-        fprintf(s->stats_file, "vmaf_avg:%0.2f ", get_vmaf(mse, 1, s->average_max));
-        for (j = 0; j < s->nb_components; j++) {
-            c = s->is_rgb ? s->rgba_map[j] : j;
-            fprintf(s->stats_file, "vmaf_%c:%0.2f ", s->comps[j],
-                    get_vmaf(comp_mse[c], 1, s->max[c]));
-        }
-        if (s->stats_version == 2 && s->stats_add_max) {
-            fprintf(s->stats_file, "max_avg:%d ", s->average_max);
-            for (j = 0; j < s->nb_components; j++) {
-                c = s->is_rgb ? s->rgba_map[j] : j;
-                fprintf(s->stats_file, "max_%c:%d ", s->comps[j], s->max[c]);
-            }
-        }
-        fprintf(s->stats_file, "\n");
-    }
 
     return main;
 }
@@ -252,17 +176,8 @@ static av_cold int init(AVFilterContext *ctx)
 static int query_formats(AVFilterContext *ctx)
 {
     static const enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY16,
-#define PF_NOALPHA(suf) AV_PIX_FMT_YUV420##suf,  AV_PIX_FMT_YUV422##suf,  AV_PIX_FMT_YUV444##suf
-#define PF_ALPHA(suf)   AV_PIX_FMT_YUVA420##suf, AV_PIX_FMT_YUVA422##suf, AV_PIX_FMT_YUVA444##suf
-#define PF(suf)         PF_NOALPHA(suf), PF_ALPHA(suf)
-        PF(P), PF(P9), PF(P10), PF_NOALPHA(P12), PF_NOALPHA(P14), PF(P16),
-        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV411P, AV_PIX_FMT_YUV410P,
-        AV_PIX_FMT_YUVJ411P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
-        AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_YUVJ444P,
-        AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
-        AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
-        AV_PIX_FMT_GBRAP, AV_PIX_FMT_GBRAP16,
+        AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV420P10LE,
         AV_PIX_FMT_NONE
     };
 
@@ -292,34 +207,6 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
-    s->max[0] = (1 << desc->comp[0].depth) - 1;
-    s->max[1] = (1 << desc->comp[1].depth) - 1;
-    s->max[2] = (1 << desc->comp[2].depth) - 1;
-    s->max[3] = (1 << desc->comp[3].depth) - 1;
-
-    s->is_rgb = ff_fill_rgba_map(s->rgba_map, inlink->format) >= 0;
-    s->comps[0] = s->is_rgb ? 'r' : 'y' ;
-    s->comps[1] = s->is_rgb ? 'g' : 'u' ;
-    s->comps[2] = s->is_rgb ? 'b' : 'v' ;
-    s->comps[3] = 'a';
-
-    s->planeheight[1] = s->planeheight[2] = AV_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
-    s->planeheight[0] = s->planeheight[3] = inlink->h;
-    s->planewidth[1]  = s->planewidth[2]  = AV_CEIL_RSHIFT(inlink->w, desc->log2_chroma_w);
-    s->planewidth[0]  = s->planewidth[3]  = inlink->w;
-    sum = 0;
-    for (j = 0; j < s->nb_components; j++)
-        sum += s->planeheight[j] * s->planewidth[j];
-    average_max = 0;
-    for (j = 0; j < s->nb_components; j++) {
-        s->planeweight[j] = (double) s->planeheight[j] * s->planewidth[j] / sum;
-        average_max += s->max[j] * s->planeweight[j];
-    }
-    s->average_max = lrint(average_max);
-
-    s->dsp.sse_line = desc->comp[0].depth > 8 ? sse_line_16bit : sse_line_8bit;
-    if (ARCH_X86)
-        ff_vmaf_init_x86(&s->dsp, desc->comp[0].depth);
 
     return 0;
 }
@@ -357,23 +244,6 @@ static int request_frame(AVFilterLink *outlink)
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
-
-    if (s->nb_frames > 0) {
-        int j;
-        char buf[256];
-
-        buf[0] = 0;
-        for (j = 0; j < s->nb_components; j++) {
-            int c = s->is_rgb ? s->rgba_map[j] : j;
-            av_strlcatf(buf, sizeof(buf), " %c:%f", s->comps[j],
-                        get_vmaf(s->mse_comp[c], s->nb_frames, s->max[c]));
-        }
-        av_log(ctx, AV_LOG_INFO, "VMAF%s average:%f min:%f max:%f\n",
-               buf,
-               get_vmaf(s->mse, s->nb_frames, s->average_max),
-               get_vmaf(s->max_mse, 1, s->average_max),
-               get_vmaf(s->min_mse, 1, s->average_max));
-    }
 
     ff_dualinput_uninit(&s->dinput);
 
