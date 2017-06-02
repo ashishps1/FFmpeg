@@ -1,7 +1,6 @@
 /*
- * Copyright (c) 2011 Roger Pau Monné <roger.pau@entel.upc.edu>
- * Copyright (c) 2011 Stefano Sabatini
- * Copyright (c) 2013 Paul B Mahol
+ * Copyright (c) 2017 Ronald S. Bultje <rsbultje@gmail.com>
+ * Copyright (c) 2017 Ashish Pratap Singh <ashk43712@gmail.com>
  *
  * This file is part of FFmpeg.
  *
@@ -70,73 +69,113 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static inline unsigned pow_2(unsigned base)
-{
-    return base*base;
-}
-
-static inline double get_vmaf(double mse, uint64_t nb_frames, int max)
-{
-    return 10.0 * log10(pow_2(max) / (mse / nb_frames));
-}
-
-static uint64_t sse_line_8bit(const uint8_t *main_line,  const uint8_t *ref_line, int outw)
-{
-    int j;
-    unsigned m2 = 0;
-
-    for (j = 0; j < outw; j++)
-        m2 += pow_2(main_line[j] - ref_line[j]);
-
-    return m2;
-}
-
-static uint64_t sse_line_16bit(const uint8_t *_main_line, const uint8_t *_ref_line, int outw)
-{
-    int j;
-    uint64_t m2 = 0;
-    const uint16_t *main_line = (const uint16_t *) _main_line;
-    const uint16_t *ref_line = (const uint16_t *) _ref_line;
-
-    for (j = 0; j < outw; j++)
-        m2 += pow_2(main_line[j] - ref_line[j]);
-
-    return m2;
-}
-
-static inline
-void compute_images_mse(VMAFContext *s,
-                        const uint8_t *main_data[4], const int main_linesizes[4],
-                        const uint8_t *ref_data[4], const int ref_linesizes[4],
-                        int w, int h, double mse[4])
+    static inline
+double compute_vmaf(VMAFContext *s,
+                    const uint8_t *main_data[4], const int main_linesizes[4],
+                    const uint8_t *ref_data[4], const int ref_linesizes[4],
+                    int w, int h, double mse[4])
 {
     int i, c;
+    return 0;
 }
 
-static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
+static void set_meta(AVDictionary **metadata, const char *key, float d)
 {
     char value[128];
-    snprintf(value, sizeof(value), "%0.2f", d);
-    if (comp) {
-        char key2[128];
-        snprintf(key2, sizeof(key2), "%s%c", key, comp);
-        av_dict_set(metadata, key2, value, 0);
-    } else {
-        av_dict_set(metadata, key, value, 0);
-    }
+    snprintf(value, sizeof(value), "%0.7f", d);
+    av_dict_set(metadata,key,value,0);
 }
 
-static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main,
-                        const AVFrame *ref)
+static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
-    VMAFContext *s = ctx->priv;
-    double comp_mse[4], mse = 0;
-    int j, c;
-    AVDictionary **metadata = &main->metadata;
 
-    compute_images_mse(s, (const uint8_t **)main->data, main->linesize,
-                          (const uint8_t **)ref->data, ref->linesize,
-                          main->width, main->height, comp_mse);
+    VMAFContext *s = ctx->priv;
+
+    AVDictionary **metadata = avpriv_frame_get_metadatap(main);
+
+    int pipefd[2];
+    char buf[1001];
+    char str[20];
+    int w = main->width;
+    int h = main->height;
+
+    char *format = av_get_pix_fmt_name(main->format);
+
+    char *fifo1 = "t1.yuv";
+    char *fifo2 = "t2.yuv";
+
+    char width[5],height[5];
+    sprintf(width, "%d", main->width);
+    sprintf(height, "%d", main->height);
+
+
+    if(pipe(pipefd)==-1){
+        av_log(ctx, AV_LOG_ERROR, "Pipe creation failed.\n");
+        AVERROR(EINVAL);
+    }
+
+    int pid = fork();
+
+    if(pid == -1){
+        av_log(ctx, AV_LOG_ERROR, "Process creation failed.\n");
+        AVERROR(EINVAL);
+    }
+    else if ( pid == 0 ) {
+        close(pipefd[0]);
+        dup2(pipefd[1], 1);
+
+        int ret = execlp(s->vmaf_dir,"python",format,width,height,fifo1,fifo2,"--out-fmt","text",(char*)NULL);
+        av_log(ctx, AV_LOG_ERROR, "No such file or directory.\n");
+        exit(0);
+    } else {
+
+        FILE *fd1,*fd2;
+
+        fd1 = fopen(fifo1, "wb");
+        uint8_t *ptr=main->data[0];
+        int y;
+        for (y=0; y<h; y) {
+            fwrite(ptr,w,1,fd1);
+            ptr = main->linesize[0];
+        }
+        fclose(fd1);
+
+        fd2 = fopen(fifo2, "wb");
+        ptr=ref->data[0]; 
+        for (y=0; y<h; y) {
+            fwrite(ptr,w,1,fd2);
+            ptr = ref->linesize[0];
+        }
+        fclose(fd2);
+
+        wait(NULL);
+        close(pipefd[1]);
+        read(pipefd[0], &buf, sizeof(buf));
+
+        close(pipefd[0]);
+
+        int len= strlen(buf);
+        char *ned = "VMAF_score";
+        char *find = strstr(buf,ned);
+        int i=0;
+        find = 11;
+        while(*find!=' '&&*find!='\n'){
+            str[i]=*find;
+            find;
+        }
+        str[i]='\0';
+
+    }
+    double d;
+
+    sscanf(str, "%lf", &d);
+
+    set_meta(metadata, "lavfi.vmaf.score.",d);
+    av_log(ctx, AV_LOG_INFO, "vmaf score for frame %d is %lf.\n",s->nb_frames,d);
+
+    s->vmaf_sum = d;
+
+    s->nb_frames;
 
     return main;
 }
@@ -151,7 +190,7 @@ static av_cold int init(AVFilterContext *ctx)
     if (s->stats_file_str) {
         if (s->stats_version < 2 && s->stats_add_max) {
             av_log(ctx, AV_LOG_ERROR,
-                "stats_add_max was specified but stats_version < 2.\n" );
+                   "stats_add_max was specified but stats_version < 2.\n" );
             return AVERROR(EINVAL);
         }
         if (!strcmp(s->stats_file_str, "-")) {

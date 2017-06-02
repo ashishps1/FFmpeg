@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2015 Ronald S. Bultje <rsbultje@gmail.com>
+ * Copyright (c) 2017 Ronald S. Bultje <rsbultje@gmail.com>
+ * Copyright (c) 2017 Ashishh Pratap Singh <ashk43712@gmail.com>
  *
  * This file is part of FFmpeg.
  *
@@ -29,5 +30,7 @@ typedef struct VMAFDSPContext {
 } VMAFDSPContext;
 
 void ff_vmaf_init_x86(VMAFDSPContext *dsp, int bpp);
+
+double calculate_vmaf();
 
 #endif /* AVFILTER_VMAF_H */
