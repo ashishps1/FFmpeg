@@ -38,20 +38,19 @@
 typedef struct VMAFContext {
     const AVClass *class;
     FFDualInputContext dinput;
-    double mse, min_mse, max_mse, mse_comp[4];
     uint64_t nb_frames;
     FILE *stats_file;
     char *stats_file_str;
     int stats_version;
     int stats_header_written;
     int stats_add_max;
-    int max[4], average_max;
     int is_rgb;
     uint8_t rgba_map[4];
     char comps[4];
     int nb_components;
     int planewidth[4];
     int planeheight[4];
+    double vmaf_sum;
     double planeweight[4];
     VMAFDSPContext dsp;
 } VMAFContext;
@@ -69,14 +68,9 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-    static inline
-double compute_vmaf(VMAFContext *s,
-                    const uint8_t *main_data[4], const int main_linesizes[4],
-                    const uint8_t *ref_data[4], const int ref_linesizes[4],
-                    int w, int h, double mse[4])
+static inline double get_vmaf(double vmaf_sum, uint64_t nb_frames)
 {
-    int i, c;
-    return 0;
+    return vmaf_sum/nb_frames;
 }
 
 static void set_meta(AVDictionary **metadata, const char *key, float d)
@@ -86,6 +80,35 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata,key,value,0);
 }
 
+double compute_vmaf_score(char *format, int width, int height, const uint8_t *main_data, const uint8_t *ref_data, int main_linesize, int ref_linesize)
+{
+    int i, c;
+
+    char *fifo1 = "t1.yuv";
+    char *fifo2 = "t2.yuv";
+
+    FILE *fd1,*fd2;
+
+    fd1 = fopen(fifo1, "wb");
+    uint8_t *ptr = main_data;
+    int y;
+    for (y=0; y<height; y++) {
+        fwrite(ptr,width,1,fd1);
+        ptr += main_linesize;
+    }
+    fclose(fd1);
+
+    fd2 = fopen(fifo2, "wb");
+    ptr = ref_data;
+    for (y=0; y<height; y++) {
+        fwrite(ptr,width,1,fd2);
+        ptr += ref_linesize;
+    }
+    fclose(fd2);
+
+    return 0;
+}
+
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
 
@@ -93,89 +116,17 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     AVDictionary **metadata = avpriv_frame_get_metadatap(main);
 
-    int pipefd[2];
-    char buf[1001];
-    char str[20];
-    int w = main->width;
-    int h = main->height;
-
     char *format = av_get_pix_fmt_name(main->format);
 
-    char *fifo1 = "t1.yuv";
-    char *fifo2 = "t2.yuv";
-
-    char width[5],height[5];
-    sprintf(width, "%d", main->width);
-    sprintf(height, "%d", main->height);
+    double score = compute_vmaf_score(format,main->width,main->height,main->data[0],ref->data[0],main->linesize[0],ref->linesize[0]);
 
 
-    if(pipe(pipefd)==-1){
-        av_log(ctx, AV_LOG_ERROR, "Pipe creation failed.\n");
-        AVERROR(EINVAL);
-    }
+    set_meta(metadata, "lavfi.vmaf.score.",score);
+    av_log(ctx, AV_LOG_INFO, "vmaf score for frame %lu is %lf.\n",s->nb_frames,score);
 
-    int pid = fork();
+    s->vmaf_sum += score;
 
-    if(pid == -1){
-        av_log(ctx, AV_LOG_ERROR, "Process creation failed.\n");
-        AVERROR(EINVAL);
-    }
-    else if ( pid == 0 ) {
-        close(pipefd[0]);
-        dup2(pipefd[1], 1);
-
-        int ret = execlp(s->vmaf_dir,"python",format,width,height,fifo1,fifo2,"--out-fmt","text",(char*)NULL);
-        av_log(ctx, AV_LOG_ERROR, "No such file or directory.\n");
-        exit(0);
-    } else {
-
-        FILE *fd1,*fd2;
-
-        fd1 = fopen(fifo1, "wb");
-        uint8_t *ptr=main->data[0];
-        int y;
-        for (y=0; y<h; y) {
-            fwrite(ptr,w,1,fd1);
-            ptr = main->linesize[0];
-        }
-        fclose(fd1);
-
-        fd2 = fopen(fifo2, "wb");
-        ptr=ref->data[0]; 
-        for (y=0; y<h; y) {
-            fwrite(ptr,w,1,fd2);
-            ptr = ref->linesize[0];
-        }
-        fclose(fd2);
-
-        wait(NULL);
-        close(pipefd[1]);
-        read(pipefd[0], &buf, sizeof(buf));
-
-        close(pipefd[0]);
-
-        int len= strlen(buf);
-        char *ned = "VMAF_score";
-        char *find = strstr(buf,ned);
-        int i=0;
-        find = 11;
-        while(*find!=' '&&*find!='\n'){
-            str[i]=*find;
-            find;
-        }
-        str[i]='\0';
-
-    }
-    double d;
-
-    sscanf(str, "%lf", &d);
-
-    set_meta(metadata, "lavfi.vmaf.score.",d);
-    av_log(ctx, AV_LOG_INFO, "vmaf score for frame %d is %lf.\n",s->nb_frames,d);
-
-    s->vmaf_sum = d;
-
-    s->nb_frames;
+    s->nb_frames++;
 
     return main;
 }
@@ -183,9 +134,6 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 static av_cold int init(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
-
-    s->min_mse = +INFINITY;
-    s->max_mse = -INFINITY;
 
     if (s->stats_file_str) {
         if (s->stats_version < 2 && s->stats_add_max) {
@@ -231,9 +179,6 @@ static int config_input_ref(AVFilterLink *inlink)
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     VMAFContext *s = ctx->priv;
-    double average_max;
-    unsigned sum;
-    int j;
 
     s->nb_components = desc->nb_components;
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
@@ -283,7 +228,10 @@ static int request_frame(AVFilterLink *outlink)
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
-
+    if (s->nb_frames > 0) {
+        av_log(ctx, AV_LOG_INFO, "VMAF average:%f\n",
+               get_vmaf(s->vmaf_sum, s->nb_frames));
+    }
     ff_dualinput_uninit(&s->dinput);
 
     if (s->stats_file && s->stats_file != stdout)

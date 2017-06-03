@@ -31,6 +31,6 @@ typedef struct VMAFDSPContext {
 
 void ff_vmaf_init_x86(VMAFDSPContext *dsp, int bpp);
 
-double calculate_vmaf();
+double compute_vmaf_score(char *format, int width, int height, const uint8_t *main_data, const uint8_t *ref_data, int main_linesize, int ref_linesize);
 
 #endif /* AVFILTER_VMAF_H */
