@@ -24,6 +24,10 @@
  * Caculate the VMAF between two input videos.
  */
 
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -32,13 +36,15 @@
 #include "drawutils.h"
 #include "formats.h"
 #include "internal.h"
-#include "vmaf.h"
+#include "libvmaf.h"
 #include "video.h"
+#include "vmaf.h"
 
 typedef struct VMAFContext {
     const AVClass *class;
     FFDualInputContext dinput;
     uint64_t nb_frames;
+    char cwd[200],main_path[200],ref_path[200];
     FILE *stats_file;
     char *stats_file_str;
     int stats_version;
@@ -80,9 +86,12 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata,key,value,0);
 }
 
-double compute_vmaf_score(char *format, int width, int height, const uint8_t *main_data, const uint8_t *ref_data, int main_linesize, int ref_linesize)
+static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *ref)
 {
     int i, c;
+
+    char *format = av_get_pix_fmt_name(main->format);
+    int w = main->width, h = main->height;
 
     char *fifo1 = "t1.yuv";
     char *fifo2 = "t2.yuv";
@@ -90,23 +99,25 @@ double compute_vmaf_score(char *format, int width, int height, const uint8_t *ma
     FILE *fd1,*fd2;
 
     fd1 = fopen(fifo1, "wb");
-    uint8_t *ptr = main_data;
+    uint8_t *ptr = main->data[0];
     int y;
-    for (y=0; y<height; y++) {
-        fwrite(ptr,width,1,fd1);
-        ptr += main_linesize;
+    for (y=0; y<h; y++) {
+        fwrite(ptr,w,1,fd1);
+        ptr += main->linesize[0];
     }
     fclose(fd1);
 
     fd2 = fopen(fifo2, "wb");
-    ptr = ref_data;
-    for (y=0; y<height; y++) {
-        fwrite(ptr,width,1,fd2);
-        ptr += ref_linesize;
+    ptr = ref->data[0];
+    for (y=0; y<h; y++) {
+        fwrite(ptr,w,1,fd2);
+        ptr += ref->linesize[0];
     }
     fclose(fd2);
 
-    return 0;
+    //double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path);
+    return 0.0;
+
 }
 
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
@@ -116,9 +127,8 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     AVDictionary **metadata = avpriv_frame_get_metadatap(main);
 
-    char *format = av_get_pix_fmt_name(main->format);
 
-    double score = compute_vmaf_score(format,main->width,main->height,main->data[0],ref->data[0],main->linesize[0],ref->linesize[0]);
+    double score = compute_vmaf_score(s,main,ref);
 
 
     set_meta(metadata, "lavfi.vmaf.score.",score);
@@ -191,6 +201,30 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
+
+    getcwd(s->main_path, sizeof(s->main_path));
+    // printf("%s\n",s->cwd);
+    getcwd(s->ref_path, sizeof(s->ref_path));
+    int len = strlen(s->main_path);
+    s->main_path[len++] = 't';
+    s->main_path[len++] = '1';
+    s->main_path[len++] = '.';
+    s->main_path[len++] = 'y';
+    s->main_path[len++] = 'u';
+    s->main_path[len++] = 'v';
+    s->main_path[len] = '\0';
+
+    len = strlen(s->ref_path);
+
+    s->ref_path[len++] = 't';
+    s->ref_path[len++] = '2';
+    s->ref_path[len++] = '.';
+    s->ref_path[len++] = 'y';
+    s->ref_path[len++] = 'u';
+    s->ref_path[len++] = 'v';
+    s->ref_path[len] = '\0';
+
+    av_log(ctx, AV_LOG_INFO, "directory is %s.\n",s->cwd);
 
     return 0;
 }
