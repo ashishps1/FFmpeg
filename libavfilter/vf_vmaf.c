@@ -115,8 +115,8 @@ static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *r
     }
     fclose(fd2);
 
-    //double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path);
-    return 0.0;
+    double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path);
+    return vmaf_score;
 
 }
 
