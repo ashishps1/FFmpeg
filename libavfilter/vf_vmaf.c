@@ -23,7 +23,7 @@
  * @file
  * Caculate the VMAF between two input videos.
  */
-
+#include "libvmaf.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
@@ -36,7 +36,6 @@
 #include "drawutils.h"
 #include "formats.h"
 #include "internal.h"
-#include "libvmaf.h"
 #include "video.h"
 #include "vmaf.h"
 
@@ -114,7 +113,7 @@ static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *r
         ptr += ref->linesize[0];
     }
     fclose(fd2);
-
+	
     double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path);
     return vmaf_score;
 
