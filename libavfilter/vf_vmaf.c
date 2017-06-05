@@ -113,8 +113,10 @@ static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *r
         ptr += ref->linesize[0];
     }
     fclose(fd2);
+
+	char *model_path = "model/vmaf_v0.6.1.pkl";
 	
-    double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path);
+    double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path,model_path);
     return vmaf_score;
 
 }

@@ -5849,7 +5849,7 @@ enabled libtwolame        && require libtwolame twolame.h twolame_init -ltwolame
 enabled libv4l2           && require_pkg_config libv4l2 libv4l2.h v4l2_ioctl
 enabled libvidstab        && require_pkg_config "vidstab >= 0.98" vid.stab/libvidstab.h vsMotionDetectInit
 enabled libvmaf           && { use_pkg_config libvmaf "libvmaf.h" compute_vmaf ||
-                               { check_lib libvmaf "libvmaf.h" "compute_vmaf" -lvmaf &&
+                               { check_lib libvmaf "libvmaf.h" "compute_vmaf" -lvmaf -lstdc++ -lpthread -lm &&
                                  warn "using libvmaf without pkg-config"; } }
 enabled libvo_amrwbenc    && require libvo_amrwbenc vo-amrwbenc/enc_if.h E_IF_init -lvo-amrwbenc
 enabled libvorbis         && require libvorbis vorbis/vorbisenc.h vorbis_info_init -lvorbisenc -lvorbis -logg
