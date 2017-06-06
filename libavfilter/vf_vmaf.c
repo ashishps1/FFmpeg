@@ -114,8 +114,8 @@ static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *r
     }
     fclose(fd2);
 
-	char *model_path = "model/vmaf_v0.6.1.pkl";
-	
+    char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
+
     double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path,model_path);
     return vmaf_score;
 
@@ -207,6 +207,7 @@ static int config_input_ref(AVFilterLink *inlink)
     // printf("%s\n",s->cwd);
     getcwd(s->ref_path, sizeof(s->ref_path));
     int len = strlen(s->main_path);
+    s->main_path[len++] = '/';
     s->main_path[len++] = 't';
     s->main_path[len++] = '1';
     s->main_path[len++] = '.';
@@ -217,6 +218,7 @@ static int config_input_ref(AVFilterLink *inlink)
 
     len = strlen(s->ref_path);
 
+    s->ref_path[len++] = '/';
     s->ref_path[len++] = 't';
     s->ref_path[len++] = '2';
     s->ref_path[len++] = '.';
@@ -267,6 +269,8 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_INFO, "VMAF average:%f\n",
                get_vmaf(s->vmaf_sum, s->nb_frames));
     }
+    remove("t1.yuv");
+    remove("t2.yuv");
     ff_dualinput_uninit(&s->dinput);
 
     if (s->stats_file && s->stats_file != stdout)
