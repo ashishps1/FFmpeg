@@ -43,7 +43,6 @@ typedef struct VMAFContext {
     const AVClass *class;
     FFDualInputContext dinput;
     uint64_t nb_frames;
-    char cwd[200],main_path[200],ref_path[200];
     FILE *stats_file;
     char *stats_file_str;
     int stats_version;
@@ -92,31 +91,9 @@ static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *r
     char *format = av_get_pix_fmt_name(main->format);
     int w = main->width, h = main->height;
 
-    char *fifo1 = "t1.yuv";
-    char *fifo2 = "t2.yuv";
-
-    FILE *fd1,*fd2;
-
-    fd1 = fopen(fifo1, "wb");
-    uint8_t *ptr = main->data[0];
-    int y;
-    for (y=0; y<h; y++) {
-        fwrite(ptr,w,1,fd1);
-        ptr += main->linesize[0];
-    }
-    fclose(fd1);
-
-    fd2 = fopen(fifo2, "wb");
-    ptr = ref->data[0];
-    for (y=0; y<h; y++) {
-        fwrite(ptr,w,1,fd2);
-        ptr += ref->linesize[0];
-    }
-    fclose(fd2);
-
     char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
 
-    double vmaf_score = compute_vmaf(format,w,h,s->ref_path,s->main_path,model_path);
+    double vmaf_score = compute_vmaf(format,w,h,ref->data[0],main->data[0],model_path);
     return vmaf_score;
 
 }
@@ -202,33 +179,6 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
-
-    getcwd(s->main_path, sizeof(s->main_path));
-    // printf("%s\n",s->cwd);
-    getcwd(s->ref_path, sizeof(s->ref_path));
-    int len = strlen(s->main_path);
-    s->main_path[len++] = '/';
-    s->main_path[len++] = 't';
-    s->main_path[len++] = '1';
-    s->main_path[len++] = '.';
-    s->main_path[len++] = 'y';
-    s->main_path[len++] = 'u';
-    s->main_path[len++] = 'v';
-    s->main_path[len] = '\0';
-
-    len = strlen(s->ref_path);
-
-    s->ref_path[len++] = '/';
-    s->ref_path[len++] = 't';
-    s->ref_path[len++] = '2';
-    s->ref_path[len++] = '.';
-    s->ref_path[len++] = 'y';
-    s->ref_path[len++] = 'u';
-    s->ref_path[len++] = 'v';
-    s->ref_path[len] = '\0';
-
-    av_log(ctx, AV_LOG_INFO, "directory is %s.\n",s->cwd);
-
     return 0;
 }
 
@@ -269,8 +219,6 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_INFO, "VMAF average:%f\n",
                get_vmaf(s->vmaf_sum, s->nb_frames));
     }
-    remove("t1.yuv");
-    remove("t2.yuv");
     ff_dualinput_uninit(&s->dinput);
 
     if (s->stats_file && s->stats_file != stdout)
