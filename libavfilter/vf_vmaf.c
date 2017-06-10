@@ -59,6 +59,18 @@ typedef struct VMAFContext {
     VMAFDSPContext dsp;
 } VMAFContext;
 
+struct VMAFFrame{
+	uint8_t *ref_data, *main_data;
+	int ref_stride, main_stride;
+	struct VMAFFrame* next_frame;
+} VFrame;
+
+struct VMAFFrame* head = NULL;
+struct VMAFFrame* curr = NULL;
+
+char *format;
+int width, height;
+
 #define OFFSET(x) offsetof(VMAFContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
@@ -84,16 +96,36 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata,key,value,0);
 }
 
-static double compute_vmaf_score(VMAFContext *s, AVFrame *main, const AVFrame *ref)
-{
-    int i, c;
+static int read_frame(uint8_t *ref_buf, int *ref_stride, uint8_t *main_buf, int *main_stride){
+	if(curr == NULL){
+		printf("All frame read\n");
+		return -1;
+	}
+	printf("read frame started\n");
+	ref_buf = curr->ref_data;
+	ref_buf = curr->main_data;
+	*ref_stride = curr->ref_stride;
+	*main_stride = curr->main_stride;
+	printf("%d\n",*ref_stride);
 
-    char *format = av_get_pix_fmt_name(main->format);
-    int w = main->width, h = main->height;
+
+	curr == curr->next_frame;
+	printf("read frame finished luckily\n");
+	return 0;
+}
+
+
+static double compute_vmaf_score()
+{
+	printf("inside compute vmaf1\n");
+    
+	printf("width=%d,height=%d,format=%s\n",width,height,format);
 
     char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
 
-    double vmaf_score = compute_vmaf(format,w,h,ref->data[0],main->data[0],model_path);
+    double vmaf_score;
+	vmaf_score = compute_vmaf(format,width,height,read_frame,model_path);
+	printf("compute vmaf competed\n");
     return vmaf_score;
 
 }
@@ -106,11 +138,32 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     AVDictionary **metadata = avpriv_frame_get_metadatap(main);
 
 
-    double score = compute_vmaf_score(s,main,ref);
+    //double score = compute_vmaf_score(s,main,ref);
 
-
-    set_meta(metadata, "lavfi.vmaf.score.",score);
+	double score = 0;
+    //set_meta(metadata, "lavfi.vmaf.score.",score);
     av_log(ctx, AV_LOG_INFO, "vmaf score for frame %lu is %lf.\n",s->nb_frames,score);
+	static int p = 0;
+	
+	if(p == 0){
+		head = (struct VMAFFrame*)malloc(sizeof(struct VMAFFrame));
+		head->ref_data = ref->data[0];
+		head->main_data = main->data[0];
+		head->ref_stride = ref->linesize[0];
+		head->main_data = main->linesize[0];
+		curr = head;
+	}
+	else{
+		struct VMAFFrame* new_node = (struct VMAFFrame*)malloc(sizeof(struct VMAFFrame));
+		new_node->ref_data = ref->data[0];
+		new_node->main_data = main->data[0];
+		new_node->ref_stride = ref->linesize[0];
+		new_node->main_data = main->linesize[0];
+		curr->next_frame = new_node;
+		curr = new_node;
+	}
+	p++;
+
 
     s->vmaf_sum += score;
 
@@ -167,7 +220,6 @@ static int config_input_ref(AVFilterLink *inlink)
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     VMAFContext *s = ctx->priv;
-
     s->nb_components = desc->nb_components;
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -178,6 +230,10 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "Inputs must be of same pixel format.\n");
         return AVERROR(EINVAL);
     }
+
+	format = av_get_pix_fmt_name(ctx->inputs[0]->format);
+	width = ctx->inputs[0]->w;
+	height = ctx->inputs[0]->h;
 
     return 0;
 }
@@ -212,9 +268,11 @@ static int request_frame(AVFilterLink *outlink)
     return ff_dualinput_request_frame(&s->dinput, outlink);
 }
 
+
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
+
     if (s->nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "VMAF average:%f\n",
                get_vmaf(s->vmaf_sum, s->nb_frames));
@@ -223,6 +281,12 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     if (s->stats_file && s->stats_file != stdout)
         fclose(s->stats_file);
+	
+	double vmaf_score = compute_vmaf_score();
+	printf("compute vmaf competed\n");
+    printf("%d\n",vmaf_score);
+
+	return 0;
 }
 
 static const AVFilterPad vmaf_inputs[] = {
