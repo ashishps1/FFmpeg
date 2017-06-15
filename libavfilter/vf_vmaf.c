@@ -72,7 +72,6 @@ static int width, height;
 pthread_mutex_t lock;
 pthread_cond_t cond;
 int get_next = 0;
-int data_yes = 0;
 AVFrame *gmain;
 AVFrame *gref;
 
@@ -101,7 +100,7 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata,key,value,0);
 }
 
-static void read_frame(uint8_t *ref_buf, int *ref_stride, uint8_t *main_buf, int *main_stride){
+static void read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride){
 	pthread_mutex_lock(&lock);
 	while(gref == NULL){
 		pthread_cond_wait(&cond, &lock);
@@ -109,13 +108,31 @@ static void read_frame(uint8_t *ref_buf, int *ref_stride, uint8_t *main_buf, int
 	
     *ref_stride = gref->linesize[0];
     *main_stride = gmain->linesize[0];
+	printf("%d %d\n",*ref_stride,*main_stride);
+	uint8_t *ptr = gref->data[0];
+	float *ptr1 = ref_data; 
+ 
+	int i,j;
 
-	ref_buf = malloc(sizeof(uint8_t));
-	main_buf = malloc(sizeof(uint8_t));
+	for(i=0;i<height;i++){
+		for(j=0;j<width;j++){
+			ptr1[j] = (float)ptr[j];
+		}
+		ptr += *ref_stride;
+		ptr1 += *ref_stride;
+	}
 
-	memcpy(ref_buf, gref->data[0], sizeof(uint8_t));
-	memcpy(main_buf, gmain->data[0], sizeof(uint8_t));	
+	ptr = gmain->data[0];
+	ptr1 = main_data; 
 	
+	for(i=0;i<height;i++){
+		for(j=0;j<width;j++){
+			ptr1[j] = (float)ptr[j];
+		}
+		ptr += *main_stride;
+		ptr1 += *main_stride;
+	}
+
 	gref = NULL;
 	gmain = NULL;
 
@@ -134,6 +151,8 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 		pthread_cond_wait(&cond, &lock);
 	}
 
+	int i,j;
+
 	gref = malloc(sizeof(AVFrame));
 	gmain = malloc(sizeof(AVFrame));
 
@@ -143,15 +162,13 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 	pthread_cond_signal(&cond);    
 	pthread_mutex_unlock(&lock);
 
-/*
-	double score = 0;
+/*	double score = 0;
     //set_meta(metadata, "lavfi.vmaf.score.",score);
     //av_log(ctx, AV_LOG_INFO, "vmaf score for frame %lu is %lf.\n",s->nb_frames,score);
 	//printf("v");
 	static int p = 0;
 	p = 1;
     s->vmaf_sum += score;
-
     s->nb_frames++;
 */
     return main;
@@ -268,6 +285,7 @@ static int config_input_ref(AVFilterLink *inlink)
 
     return 0;
 }
+
 
 static int config_output(AVFilterLink *outlink)
 {
