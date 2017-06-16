@@ -52,10 +52,8 @@ typedef struct VMAFContext {
     int stats_header_written;
     int stats_add_max;
     int is_rgb;
-	pthread_t thread;
-	pthread_t main_thread_id;
-	pthread_t vmaf_thread_id;
-	pthread_attr_t attr;
+    pthread_t thread;
+    pthread_attr_t attr;
     uint8_t rgba_map[4];
     char comps[4];
     int nb_components;
@@ -71,7 +69,9 @@ static char *format;
 static int width, height;
 pthread_mutex_t lock;
 pthread_cond_t cond;
-int get_next = 0;
+pthread_t main_thread_id;
+pthread_t vmaf_thread_id;
+int eof = 0;
 AVFrame *gmain;
 AVFrame *gref;
 
@@ -100,45 +100,50 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata,key,value,0);
 }
 
-static void read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride){
-	pthread_mutex_lock(&lock);
-	while(gref == NULL){
-		pthread_cond_wait(&cond, &lock);
-	}
-	
+static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride, double *score){
+    if(eof == 1){
+        return 1;
+    }
+    pthread_mutex_lock(&lock);
+    while(gref == NULL){
+        pthread_cond_wait(&cond, &lock);
+    }
+
     *ref_stride = gref->linesize[0];
     *main_stride = gmain->linesize[0];
-	printf("%d %d\n",*ref_stride,*main_stride);
-	uint8_t *ptr = gref->data[0];
-	float *ptr1 = ref_data; 
- 
-	int i,j;
 
-	for(i=0;i<height;i++){
-		for(j=0;j<width;j++){
-			ptr1[j] = (float)ptr[j];
-		}
-		ptr += *ref_stride;
-		ptr1 += *ref_stride;
-	}
+    uint8_t *ptr = gref->data[0];
+    float *ptr1 = ref_data;
 
-	ptr = gmain->data[0];
-	ptr1 = main_data; 
-	
-	for(i=0;i<height;i++){
-		for(j=0;j<width;j++){
-			ptr1[j] = (float)ptr[j];
-		}
-		ptr += *main_stride;
-		ptr1 += *main_stride;
-	}
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            ptr1[j] = (float)ptr[j];
+        }
+        ptr += *ref_stride;
+        ptr1 += *ref_stride;
+    }
 
-	gref = NULL;
-	gmain = NULL;
+    ptr = gmain->data[0];
+    ptr1 = main_data;
 
-	pthread_cond_signal(&cond);    
-	pthread_mutex_unlock(&lock);
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            ptr1[j] = (float)ptr[j];
+        }
+        ptr += *main_stride;
+        ptr1 += *main_stride;
+    }
+
+    gref = NULL;
+    gmain = NULL;
+
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&lock);
+
+    return eof;
 }
+
 
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
@@ -146,66 +151,47 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     AVDictionary **metadata = avpriv_frame_get_metadatap(main);
 
-	pthread_mutex_lock(&lock);
-	while(gref != NULL){
-		pthread_cond_wait(&cond, &lock);
-	}
+    pthread_mutex_lock(&lock);
+    while(gref != NULL){
+        pthread_cond_wait(&cond, &lock);
+    }
 
-	int i,j;
+    gref = malloc(sizeof(AVFrame));
+    gmain = malloc(sizeof(AVFrame));
 
-	gref = malloc(sizeof(AVFrame));
-	gmain = malloc(sizeof(AVFrame));
+    memcpy(gref, ref, sizeof(AVFrame));
+    memcpy(gmain, main, sizeof(AVFrame));
 
-	memcpy(gref, ref, sizeof(AVFrame));
-	memcpy(gmain, main, sizeof(AVFrame));	
+    pthread_cond_signal(&cond);
+    pthread_mutex_unlock(&lock);
 
-	pthread_cond_signal(&cond);    
-	pthread_mutex_unlock(&lock);
-
-/*	double score = 0;
-    //set_meta(metadata, "lavfi.vmaf.score.",score);
-    //av_log(ctx, AV_LOG_INFO, "vmaf score for frame %lu is %lf.\n",s->nb_frames,score);
-	//printf("v");
-	static int p = 0;
-	p = 1;
-    s->vmaf_sum += score;
-    s->nb_frames++;
-*/
     return main;
 }
 
 static void compute_vmaf_score()
 {
-	printf("inside compute vmaf6\n");
-    
-	printf("width=%d,height=%d,format=%s\n",width,height,format);
 
     char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
 
     double vmaf_score;
 
-	vmaf_score = compute_vmaf(format, width, height, read_frame, model_path);
-	//printf("compute vmaf completed\n");
-    return vmaf_score;
+    vmaf_score = compute_vmaf(format, width, height, read_frame, model_path);
 }
 
-
-static void *BusyWork(void *t)
- {
+static void *call_vmaf(void *t)
+{
     int i;
     long tid;
     double result=0.0;
     tid = (long)t;
-	printf("busy\n");
-	compute_vmaf_score();
+    compute_vmaf_score();
     pthread_exit((void*) t);
- }
-
+}
 
 static av_cold int init(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
-	
+
     if (s->stats_file_str) {
         if (s->stats_version < 2 && s->stats_add_max) {
             av_log(ctx, AV_LOG_ERROR,
@@ -238,7 +224,6 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV420P10LE,
         AV_PIX_FMT_NONE
     };
-	printf("query formats\n");
     VMAFContext *s = ctx->priv;
 
     AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
@@ -264,24 +249,20 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
-	printf("inside config input ref\n");
+    format = av_get_pix_fmt_name(ctx->inputs[0]->format);
+    width = ctx->inputs[0]->w;
+    height = ctx->inputs[0]->h;
 
-	format = av_get_pix_fmt_name(ctx->inputs[0]->format);
-	width = ctx->inputs[0]->w;
-	height = ctx->inputs[0]->h;
-
-	/* Initialize mutex and condition variable objects */
     pthread_mutex_init(&lock, NULL);
     pthread_cond_init (&cond, NULL);
 
-	pthread_attr_init(&s->attr);
-	int d = 5;
-		
-	s->main_thread_id=pthread_self();
-	
-	int rc = pthread_create(&s->thread, &s->attr, BusyWork, (void *)d);
-	s->vmaf_thread_id = s->thread;	
+    pthread_attr_init(&s->attr);
+    int d = 5;
 
+    main_thread_id=pthread_self();
+
+    int rc = pthread_create(&s->thread, &s->attr, call_vmaf, (void *)d);
+    vmaf_thread_id = s->thread;
 
     return 0;
 }
@@ -330,7 +311,13 @@ static av_cold void uninit(AVFilterContext *ctx)
     if (s->stats_file && s->stats_file != stdout)
         fclose(s->stats_file);
 
-	return 0;
+    static int ptr = 0;
+    if(ptr == 1){
+        eof = 1;
+        pthread_join(vmaf_thread_id, NULL);
+    }
+    ptr++;
+    return 0;
 }
 
 static const AVFilterPad vmaf_inputs[] = {
