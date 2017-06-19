@@ -144,7 +144,6 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *m
     return eof;
 }
 
-
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     VMAFContext *s = ctx->priv;
@@ -170,7 +169,6 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
 static void compute_vmaf_score()
 {
-
     char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
 
     double vmaf_score;
