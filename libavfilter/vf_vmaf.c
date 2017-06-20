@@ -93,14 +93,14 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
 }
 
 static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride, double *score){
-	static int p = 0;
-	if(p == 0){
-		*ref_stride = gref->linesize[0];
-		*main_stride = gmain->linesize[0];
-		p = 1;
-		return 0;
-	}
-	
+    static int p = 0;
+    if(p == 0){
+        *ref_stride = gref->linesize[0];
+        *main_stride = gmain->linesize[0];
+        p = 1;
+        return 0;
+    }
+
     if(eof == 1){
         return 1;
     }
