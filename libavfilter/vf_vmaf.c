@@ -24,10 +24,6 @@
  * Caculate the VMAF between two input videos.
  */
 
-#include <unistd.h>
-#include <stdio.h>
-#include <errno.h>
-#include <string.h>
 #include <inttypes.h>
 #include <pthread.h>
 #include "libavutil/avstring.h"
@@ -51,16 +47,10 @@ typedef struct VMAFContext {
     int stats_version;
     int stats_header_written;
     int stats_add_max;
-    int is_rgb;
     pthread_t thread;
     pthread_attr_t attr;
-    uint8_t rgba_map[4];
-    char comps[4];
     int nb_components;
-    int planewidth[4];
-    int planeheight[4];
     double vmaf_sum;
-    double planeweight[4];
     VMAFDSPContext dsp;
 } VMAFContext;
 
@@ -72,6 +62,8 @@ pthread_cond_t cond;
 pthread_t main_thread_id;
 pthread_t vmaf_thread_id;
 int eof = 0;
+double vmaf_score;
+double curr_vmaf_score;
 AVFrame *gmain;
 AVFrame *gref;
 
@@ -171,8 +163,6 @@ static void compute_vmaf_score()
 {
     char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
 
-    double vmaf_score;
-
     vmaf_score = compute_vmaf(format, width, height, read_frame, model_path);
 }
 
@@ -180,7 +170,6 @@ static void *call_vmaf(void *t)
 {
     int i;
     long tid;
-    double result=0.0;
     tid = (long)t;
     compute_vmaf_score();
     pthread_exit((void*) t);
@@ -313,6 +302,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     if(ptr == 1){
         eof = 1;
         pthread_join(vmaf_thread_id, NULL);
+        av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",vmaf_score);
     }
     ptr++;
     return 0;
