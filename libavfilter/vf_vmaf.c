@@ -40,18 +40,19 @@
 typedef struct VMAFContext {
     const AVClass *class;
     FFDualInputContext dinput;
-	char *format;
-	int width;
-	int height;
-	pthread_t vmaf_thread_id;
-	double curr_vmaf_score;
-	double vmaf_score;
+    char *format;
+    int width;
+    int height;
+    pthread_t vmaf_thread_id;
+    double curr_vmaf_score;
+    double vmaf_score;
     uint64_t nb_frames;
-	pthread_mutex_t lock;
-	pthread_cond_t cond;
-	int eof;
-	AVFrame *gmain;
-	AVFrame *gref;
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    int eof;
+    AVFrame *gmain;
+    AVFrame *gref;
+    uint64_t nb_frames;
     FILE *stats_file;
     char *stats_file_str;
     int stats_version;
@@ -83,9 +84,9 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
 }
 
 static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride, double *score, void *ctx){
-	VMAFContext *s = (VMAFContext *)ctx;    
+    VMAFContext *s = (VMAFContext *)ctx;
 
-	static int p = 0;
+    static int p = 0;
     if(!p){
         *ref_stride = s->gref->linesize[0];
         *main_stride = s->gmain->linesize[0];
@@ -108,8 +109,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *m
     float *ptr1 = ref_data;
 
     int i,j;
-	int h = s->height;
-	int w = s->width;
+    int h = s->height;
+    int w = s->width;
 
     for(i=0;i<h;i++){
         for(j=0;j<w;j++){
@@ -171,7 +172,7 @@ static void compute_vmaf_score(VMAFContext *s)
 
 static void *call_vmaf(void *ctx)
 {
-	VMAFContext *s = (VMAFContext *)ctx; 
+    VMAFContext *s = (VMAFContext *)ctx;
     int i;
     long tid;
     tid = 5;
