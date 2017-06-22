@@ -102,19 +102,19 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
 
     static int p = 0;
 
-    if(!p){
+    if (!p) {
         *ref_stride = s->gref->linesize[0];
         *main_stride = s->gmain->linesize[0];
         p = 1;
         return 0;
     }
-    if(s->eof){
+    if (s->eof) {
         return 1;
     }
 
     pthread_mutex_lock(&s->lock);
 
-    while(s->gref == NULL){
+    while (s->gref == NULL) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
@@ -128,8 +128,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
     int h = s->height;
     int w = s->width;
 
-    for(i=0;i<h;i++){
-        for(j=0;j<w;j++){
+    for (i = 0; i < h; i++) {
+        for ( j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
         ptr += *ref_stride;
@@ -139,8 +139,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
     ptr = s->gmain->data[0];
     ptr1 = main_data;
 
-    for(i=0;i<h;i++){
-        for(j=0;j<w;j++){
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
         ptr += *main_stride;
@@ -167,10 +167,8 @@ static void compute_vmaf_score(VMAFContext *s)
 static void *call_vmaf(void *ctx)
 {
     VMAFContext *s = (VMAFContext *)ctx;
-    long tid;
-    tid = 5;
     compute_vmaf_score(s);
-    pthread_exit((void*) tid);
+    pthread_exit(NULL);
 }
 
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
@@ -178,7 +176,7 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     VMAFContext *s = ctx->priv;
 
     pthread_mutex_lock(&s->lock);
-    while(s->gref != NULL){
+    while (s->gref != NULL) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
@@ -230,7 +228,7 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV420P10LE,
         AV_PIX_FMT_NONE
     };
- 
+
     AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
     if (!fmts_list)
         return AVERROR(ENOMEM);
@@ -253,25 +251,25 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "Inputs must be of same pixel format.\n");
         return AVERROR(EINVAL);
     }
-	if(!(s->model_path)){
+    if (!(s->model_path)) {
         av_log(ctx, AV_LOG_ERROR, "No model specified.\n");
         return AVERROR(EINVAL);
-	}
+    }
 
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
-    
+
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init (&s->cond, NULL);
 
     pthread_attr_init(&s->attr);
 
     int rc = pthread_create(&s->vmaf_thread, &s->attr, call_vmaf, (void *)s);
-	if(rc){
+    if (rc) {
         av_log(ctx, AV_LOG_ERROR, "Thread creation failed.\n");
-        return AVERROR(EINVAL);		
-	}
+        return AVERROR(EINVAL);
+    }
 
     return 0;
 }
@@ -317,7 +315,7 @@ static av_cold void uninit(AVFilterContext *ctx)
         fclose(s->stats_file);
 
     static int ptr = 0;
-    if(ptr){
+    if (ptr) {
         s->eof = 1;
         pthread_join(s->vmaf_thread, NULL);
         av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
@@ -351,7 +349,7 @@ static const AVFilterPad vmaf_outputs[] = {
 
 AVFilter ff_vf_vmaf = {
     .name          = "vmaf",
-    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two video streams."),
+    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two videos."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
