@@ -101,17 +101,19 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
     VMAFContext *s = (VMAFContext *)ctx;
 
     static int p = 0;
+
     if(!p){
         *ref_stride = s->gref->linesize[0];
         *main_stride = s->gmain->linesize[0];
         p = 1;
         return 0;
     }
-
     if(s->eof){
         return 1;
     }
+
     pthread_mutex_lock(&s->lock);
+
     while(s->gref == NULL){
         pthread_cond_wait(&s->cond, &s->lock);
     }
@@ -154,6 +156,23 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
     return s->eof;
 }
 
+static void compute_vmaf_score(VMAFContext *s)
+{
+    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame,
+                                 s->model_path, s->log_path, s->log_fmt, s->disable_clip,
+                                 s->disable_avx, s->enable_transform, s->phone_model,
+                                 s->psnr, s->ssim, s->ms_ssim, s->pool, s);
+}
+
+static void *call_vmaf(void *ctx)
+{
+    VMAFContext *s = (VMAFContext *)ctx;
+    long tid;
+    tid = 5;
+    compute_vmaf_score(s);
+    pthread_exit((void*) tid);
+}
+
 static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     VMAFContext *s = ctx->priv;
@@ -173,23 +192,6 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     pthread_mutex_unlock(&s->lock);
 
     return main;
-}
-
-static void compute_vmaf_score(VMAFContext *s)
-{
-    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame,
-                                 s->model_path, s->log_path, s->log_fmt, s->disable_clip,
-                                 s->disable_avx, s->enable_transform, s->phone_model,
-                                 s->psnr, s->ssim, s->ms_ssim, s->pool, s);
-}
-
-static void *call_vmaf(void *ctx)
-{
-    VMAFContext *s = (VMAFContext *)ctx;
-    long tid;
-    tid = 5;
-    compute_vmaf_score(s);
-    pthread_exit((void*) tid);
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -259,7 +261,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
-    printf("%s\n",s->model_path);
+    
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init (&s->cond, NULL);
 
