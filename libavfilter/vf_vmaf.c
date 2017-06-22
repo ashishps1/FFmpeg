@@ -96,18 +96,9 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static int read_frame(float *ref_data, int *ref_stride, float *main_data,
-                      int *main_stride, double *score, void *ctx){
+static int read_frame(float *ref_data, float *main_data, int stride, double *score, void *ctx){
     VMAFContext *s = (VMAFContext *)ctx;
 
-    static int p = 0;
-
-    if (!p) {
-        *ref_stride = s->gref->linesize[0];
-        *main_stride = s->gmain->linesize[0];
-        p = 1;
-        return 0;
-    }
     if (s->eof) {
         return 1;
     }
@@ -118,8 +109,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
-    *ref_stride = s->gref->linesize[0];
-    *main_stride = s->gmain->linesize[0];
+    int ref_stride = s->gref->linesize[0];
+    int main_stride = s->gmain->linesize[0];
 
     uint8_t *ptr = s->gref->data[0];
     float *ptr1 = ref_data;
@@ -132,8 +123,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
         for ( j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += *ref_stride;
-        ptr1 += *ref_stride;
+        ptr += ref_stride/sizeof(*ptr);
+        ptr1 += stride/sizeof(*ptr1);
     }
 
     ptr = s->gmain->data[0];
@@ -143,8 +134,8 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data,
         for (j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += *main_stride;
-        ptr1 += *main_stride;
+        ptr += main_stride/sizeof(*ptr);
+        ptr1 += stride/sizeof(*ptr1);
     }
 
     s->gref = NULL;
