@@ -43,23 +43,32 @@ typedef struct VMAFContext {
     char *format;
     int width;
     int height;
-    pthread_t vmaf_thread_id;
     double curr_vmaf_score;
     double vmaf_score;
     uint64_t nb_frames;
+    pthread_t vmaf_thread;
+    pthread_attr_t attr;
     pthread_mutex_t lock;
     pthread_cond_t cond;
     int eof;
     AVFrame *gmain;
     AVFrame *gref;
-    uint64_t nb_frames;
+    char *model_path;
+    char *log_path;
+    char *log_fmt;
+    int disable_clip;
+    int disable_avx;
+    int enable_transform;
+    int phone_model;
+    int psnr;
+    int ssim;
+    int ms_ssim;
+    char *pool;
     FILE *stats_file;
     char *stats_file_str;
     int stats_version;
     int stats_header_written;
     int stats_add_max;
-    pthread_t thread;
-    pthread_attr_t attr;
     int nb_components;
 } VMAFContext;
 
@@ -71,19 +80,24 @@ static const AVOption vmaf_options[] = {
     {"f",          "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
     {"stats_version", "Set the format version for the stats file.",               OFFSET(stats_version),  AV_OPT_TYPE_INT,    {.i64=1},    1, 2, FLAGS },
     {"output_max",  "Add raw stats (max values) to the output log.",            OFFSET(stats_add_max), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"model_path",  "Set the model to be used for computing vmaf.",            OFFSET(model_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"log_path",  "Set the file path to be used to store logs.",            OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"log_fmt",  "Set the format of the log (xml or json).",            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"disable_clip",  "Disables clip for computing vmaf.",            OFFSET(disable_clip), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"disable avx",  "Disables avx for computing vmaf.",            OFFSET(disable_avx), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"enable_transform",  "Enables transform for computing vmaf.",            OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"phone_model",  "Invokes the phone model that will generate higher VMAF scores.",            OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"psnr",  "Enables computing psnr along with vmaf.",            OFFSET(psnr), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"ssim",  "Enables computing ssim along with vmaf.",            OFFSET(ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"ms_ssim",  "Enables computing ms-ssim along with vmaf.",            OFFSET(ms_ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"pool",  "Set the pool method to be used for computing vmaf.",            OFFSET(pool), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static void set_meta(AVDictionary **metadata, const char *key, float d)
-{
-    char value[128];
-    snprintf(value, sizeof(value), "%0.7f", d);
-    av_dict_set(metadata, key, value, 0);
-}
-
-static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *main_stride, double *score, void *ctx){
+static int read_frame(float *ref_data, int *ref_stride, float *main_data,
+                      int *main_stride, double *score, void *ctx){
     VMAFContext *s = (VMAFContext *)ctx;
 
     static int p = 0;
@@ -94,7 +108,7 @@ static int read_frame(float *ref_data, int *ref_stride, float *main_data, int *m
         return 0;
     }
 
-    if(s->eof == 1){
+    if(s->eof){
         return 1;
     }
     pthread_mutex_lock(&s->lock);
@@ -144,8 +158,6 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     VMAFContext *s = ctx->priv;
 
-    AVDictionary **metadata = avpriv_frame_get_metadatap(main);
-
     pthread_mutex_lock(&s->lock);
     while(s->gref != NULL){
         pthread_cond_wait(&s->cond, &s->lock);
@@ -165,15 +177,15 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
 static void compute_vmaf_score(VMAFContext *s)
 {
-    char *model_path = "/usr/local/share/model/vmaf_v0.6.1.pkl";
-
-    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame, model_path, s);
+    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame,
+                                 s->model_path, s->log_path, s->log_fmt, s->disable_clip,
+                                 s->disable_avx, s->enable_transform, s->phone_model,
+                                 s->psnr, s->ssim, s->ms_ssim, s->pool, s);
 }
 
 static void *call_vmaf(void *ctx)
 {
     VMAFContext *s = (VMAFContext *)ctx;
-    int i;
     long tid;
     tid = 5;
     compute_vmaf_score(s);
@@ -216,8 +228,7 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV420P10LE,
         AV_PIX_FMT_NONE
     };
-    VMAFContext *s = ctx->priv;
-
+ 
     AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
     if (!fmts_list)
         return AVERROR(ENOMEM);
@@ -240,18 +251,25 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "Inputs must be of same pixel format.\n");
         return AVERROR(EINVAL);
     }
+	if(!(s->model_path)){
+        av_log(ctx, AV_LOG_ERROR, "No model specified.\n");
+        return AVERROR(EINVAL);
+	}
 
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
-
+    printf("%s\n",s->model_path);
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init (&s->cond, NULL);
 
     pthread_attr_init(&s->attr);
 
-    int rc = pthread_create(&s->thread, &s->attr, call_vmaf, (void *)s);
-    s->vmaf_thread_id = s->thread;
+    int rc = pthread_create(&s->vmaf_thread, &s->attr, call_vmaf, (void *)s);
+	if(rc){
+        av_log(ctx, AV_LOG_ERROR, "Thread creation failed.\n");
+        return AVERROR(EINVAL);		
+	}
 
     return 0;
 }
@@ -297,13 +315,12 @@ static av_cold void uninit(AVFilterContext *ctx)
         fclose(s->stats_file);
 
     static int ptr = 0;
-    if(ptr == 1){
+    if(ptr){
         s->eof = 1;
-        pthread_join(s->vmaf_thread_id, NULL);
+        pthread_join(s->vmaf_thread, NULL);
         av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
     }
-    ptr++;
-    return 0;
+    ptr = 1;
 }
 
 static const AVFilterPad vmaf_inputs[] = {

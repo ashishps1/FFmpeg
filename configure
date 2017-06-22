@@ -1570,7 +1570,7 @@ EXTERNAL_LIBRARY_LIST="
     libtheora
     libtwolame
     libv4l2
-	libvmaf
+    libvmaf
     libvorbis
     libvpx
     libwavpack
