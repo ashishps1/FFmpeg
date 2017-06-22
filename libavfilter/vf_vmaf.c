@@ -99,7 +99,8 @@ AVFILTER_DEFINE_CLASS(vmaf);
 static int read_frame(float *ref_data, int *ref_stride, float *main_data,
                       int *main_stride, double *score, void *ctx){
     VMAFContext *s = (VMAFContext *)ctx;
-
+    static int rt=0;
+    printf("Frame: %d",rt++);
     static int p = 0;
 
     if (!p) {
