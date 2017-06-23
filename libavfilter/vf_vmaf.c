@@ -111,19 +111,22 @@ static int read_frame(float *ref_data, float *main_data, int stride, double *sco
 
     int ref_stride = s->gref->linesize[0];
     int main_stride = s->gmain->linesize[0];
-
-    uint8_t *ptr = s->gref->data[0];
+    
+    uint8_t *ptr = s->gref->data[0];    
     float *ptr1 = ref_data;
-
-    int i,j;
+    
     int h = s->height;
     int w = s->width;
-
+    
+    int i,j;
+    
+    ptr = s->gref->data[0];
+   
     for (i = 0; i < h; i++) {
         for ( j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += ref_stride/sizeof(*ptr);
+        ptr += ref_stride;
         ptr1 += stride/sizeof(*ptr1);
     }
 
@@ -134,7 +137,7 @@ static int read_frame(float *ref_data, float *main_data, int stride, double *sco
         for (j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += main_stride/sizeof(*ptr);
+        ptr += main_stride;
         ptr1 += stride/sizeof(*ptr1);
     }
 
@@ -175,8 +178,11 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     s->gmain = malloc(sizeof(AVFrame));
 
     memcpy(s->gref, ref, sizeof(AVFrame));
-    memcpy(s->gmain, main, sizeof(AVFrame));
+    memcpy(s->gmain, main, sizeof(AVFrame));  
 
+    int ref_stride = s->gref->linesize[0];
+    int main_stride = s->gmain->linesize[0];
+    
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
