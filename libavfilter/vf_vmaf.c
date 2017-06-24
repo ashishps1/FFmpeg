@@ -26,6 +26,7 @@
 
 #include <inttypes.h>
 #include <pthread.h>
+#include <string.h>
 #include <libvmaf.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
@@ -53,6 +54,7 @@ typedef struct VMAFContext {
     int eof;
     AVFrame *gmain;
     AVFrame *gref;
+    int frame_set;
     char *model_path;
     char *log_path;
     char *log_fmt;
@@ -96,37 +98,39 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static int read_frame(float *ref_data, float *main_data, int stride, double *score, void *ctx){
+static int read_frame_8bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
+
     VMAFContext *s = (VMAFContext *)ctx;
 
-    if (s->eof) {
-        return 1;
+    if (s->eof == 1) {
+        s->eof++;
+    }
+    else if (s->eof == 2) {
+        return s->eof;
     }
 
     pthread_mutex_lock(&s->lock);
 
-    while (s->gref == NULL) {
+    while (s->frame_set == 0) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
     int ref_stride = s->gref->linesize[0];
     int main_stride = s->gmain->linesize[0];
-    
-    uint8_t *ptr = s->gref->data[0];    
+
+    uint8_t *ptr = s->gref->data[0];
     float *ptr1 = ref_data;
-    
+
     int h = s->height;
     int w = s->width;
-    
+
     int i,j;
-    
-    ptr = s->gref->data[0];
-   
+
     for (i = 0; i < h; i++) {
         for ( j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += ref_stride;
+        ptr += ref_stride/sizeof(*ptr);
         ptr1 += stride/sizeof(*ptr1);
     }
 
@@ -137,24 +141,87 @@ static int read_frame(float *ref_data, float *main_data, int stride, double *sco
         for (j = 0; j < w; j++) {
             ptr1[j] = (float)ptr[j];
         }
-        ptr += main_stride;
+        ptr += main_stride/sizeof(*ptr);
         ptr1 += stride/sizeof(*ptr1);
     }
 
-    s->gref = NULL;
-    s->gmain = NULL;
+    s->frame_set = 0;
 
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    return s->eof;
+    return 0;
+}
+
+static int read_frame_10bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
+
+    VMAFContext *s = (VMAFContext *)ctx;
+
+    if (s->eof == 1) {
+        s->eof++;
+    }
+    else if (s->eof == 2) {
+        return s->eof;
+    }
+
+    pthread_mutex_lock(&s->lock);
+
+    while (s->frame_set == 0) {
+        pthread_cond_wait(&s->cond, &s->lock);
+    }
+
+    int ref_stride = s->gref->linesize[0];
+    int main_stride = s->gmain->linesize[0];
+
+    uint16_t *ptr = s->gref->data[0];
+    float *ptr1 = ref_data;
+
+    int h = s->height;
+    int w = s->width;
+
+    int i,j;
+
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
+            ptr1[j] = (float)ptr[j];
+        }
+        ptr += ref_stride / sizeof(*ptr);
+        ptr1 += stride / sizeof(*ptr1);
+    }
+
+    ptr = s->gmain->data[0];
+    ptr1 = main_data;
+
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
+            ptr1[j] = (float)ptr[j];
+        }
+        ptr += main_stride / sizeof(*ptr);
+        ptr1 += stride / sizeof(*ptr1);
+    }
+
+    s->frame_set = 0;
+
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->lock);
+
+    return 0;
 }
 
 static void compute_vmaf_score(VMAFContext *s)
 {
-    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame,
-                                 s->model_path, s->log_path, s->log_fmt, s->disable_clip,
-                                 s->disable_avx, s->enable_transform, s->phone_model,
+    void *func;
+    if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") || strcmp(s->format, "yuv444p")) {
+        func = read_frame_8bit;
+    }
+    else {
+        func = read_frame_10bit;
+    }
+
+    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, func,
+                                 s->model_path, s->log_path, s->log_fmt,
+                                 s->disable_clip, s->disable_avx,
+                                 s->enable_transform, s->phone_model,
                                  s->psnr, s->ssim, s->ms_ssim, s->pool, s);
 }
 
@@ -170,19 +237,16 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     VMAFContext *s = ctx->priv;
 
     pthread_mutex_lock(&s->lock);
-    while (s->gref != NULL) {
+
+    while (s->frame_set != 0) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
-    s->gref = malloc(sizeof(AVFrame));
-    s->gmain = malloc(sizeof(AVFrame));
+    av_frame_ref(s->gref, ref);
+    av_frame_ref(s->gmain, main);
 
-    memcpy(s->gref, ref, sizeof(AVFrame));
-    memcpy(s->gmain, main, sizeof(AVFrame));  
+    s->frame_set = 1;
 
-    int ref_stride = s->gref->linesize[0];
-    int main_stride = s->gmain->linesize[0];
-    
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
@@ -213,6 +277,14 @@ static av_cold int init(AVFilterContext *ctx)
             }
         }
     }
+
+    s->gref = av_frame_alloc();
+    s->gmain = av_frame_alloc();
+
+    pthread_mutex_init(&s->lock, NULL);
+    pthread_cond_init (&s->cond, NULL);
+
+    pthread_attr_init(&s->attr);
 
     s->dinput.process = do_vmaf;
     return 0;
@@ -256,11 +328,6 @@ static int config_input_ref(AVFilterLink *inlink)
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
-
-    pthread_mutex_init(&s->lock, NULL);
-    pthread_cond_init (&s->cond, NULL);
-
-    pthread_attr_init(&s->attr);
 
     int rc = pthread_create(&s->vmaf_thread, &s->attr, call_vmaf, (void *)s);
     if (rc) {
@@ -311,13 +378,18 @@ static av_cold void uninit(AVFilterContext *ctx)
     if (s->stats_file && s->stats_file != stdout)
         fclose(s->stats_file);
 
-    static int ptr = 0;
-    if (ptr) {
-        s->eof = 1;
-        pthread_join(s->vmaf_thread, NULL);
-        av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
-    }
-    ptr = 1;
+    pthread_mutex_lock(&s->lock);
+    s->eof = 1;
+    pthread_cond_signal(&s->cond);
+    pthread_mutex_unlock(&s->lock);
+
+    pthread_join(s->vmaf_thread, NULL);
+
+    av_frame_free(&s->gref);
+    av_frame_free(&s->gmain);
+
+    av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
+
 }
 
 static const AVFilterPad vmaf_inputs[] = {
