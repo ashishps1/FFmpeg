@@ -149,7 +149,7 @@ static AVFrame *do_psnr(AVFilterContext *ctx, AVFrame *main,
     double comp_mse[4], mse = 0;
     int j, c;
     AVDictionary **metadata = &main->metadata;
-    printf("%f\n",main->data[0][0]);
+
     compute_images_mse(s, (const uint8_t **)main->data, main->linesize,
                           (const uint8_t **)ref->data, ref->linesize,
                           main->width, main->height, comp_mse);
