@@ -44,11 +44,8 @@ typedef struct VMAFContext {
     char *format;
     int width;
     int height;
-    double curr_vmaf_score;
     double vmaf_score;
-    uint64_t nb_frames;
     pthread_t vmaf_thread;
-    pthread_attr_t attr;
     pthread_mutex_t lock;
     pthread_cond_t cond;
     int eof;
@@ -66,23 +63,13 @@ typedef struct VMAFContext {
     int ssim;
     int ms_ssim;
     char *pool;
-    FILE *stats_file;
-    char *stats_file_str;
-    int stats_version;
-    int stats_header_written;
-    int stats_add_max;
-    int nb_components;
 } VMAFContext;
 
 #define OFFSET(x) offsetof(VMAFContext, x)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption vmaf_options[] = {
-    {"stats_file", "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
-    {"f",          "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
-    {"stats_version", "Set the format version for the stats file.",               OFFSET(stats_version),  AV_OPT_TYPE_INT,    {.i64=1},    1, 2, FLAGS },
-    {"output_max",  "Add raw stats (max values) to the output log.",            OFFSET(stats_add_max), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"model_path",  "Set the model to be used for computing vmaf.",            OFFSET(model_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"model_path",  "Set the model to be used for computing vmaf.",            OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="/usr/local/share/model/vmaf_v0.6.1.pkl"}, 0, 1, FLAGS},
     {"log_path",  "Set the file path to be used to store logs.",            OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"log_fmt",  "Set the format of the log (xml or json).",            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"disable_clip",  "Disables clip for computing vmaf.",            OFFSET(disable_clip), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
@@ -100,125 +87,124 @@ AVFILTER_DEFINE_CLASS(vmaf);
 
 static int read_frame_8bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
 
-    VMAFContext *s = (VMAFContext *)ctx;
-
-    if (s->eof == 1) {
-        s->eof++;
-    }
-    else if (s->eof == 2) {
-        return s->eof;
-    }
+    VMAFContext *s = (VMAFContext *) ctx;
 
     pthread_mutex_lock(&s->lock);
 
-    while (s->frame_set == 0) {
+    while (!s->frame_set && !s->eof) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
-    int ref_stride = s->gref->linesize[0];
-    int main_stride = s->gmain->linesize[0];
+    if (s->frame_set) {
 
-    uint8_t *ptr = s->gref->data[0];
-    float *ptr1 = ref_data;
+        int ref_stride = s->gref->linesize[0];
+        int main_stride = s->gmain->linesize[0];
 
-    int h = s->height;
-    int w = s->width;
+        uint8_t *ptr = s->gref->data[0];
+        float *ptr1 = ref_data;
 
-    int i,j;
+        int h = s->height;
+        int w = s->width;
 
-    for (i = 0; i < h; i++) {
-        for ( j = 0; j < w; j++) {
-            ptr1[j] = (float)ptr[j];
+        int i,j;
+
+        for (i = 0; i < h; i++) {
+            for ( j = 0; j < w; j++) {
+                ptr1[j] = (float)ptr[j];
+            }
+            ptr += ref_stride/sizeof(*ptr);
+            ptr1 += stride/sizeof(*ptr1);
         }
-        ptr += ref_stride/sizeof(*ptr);
-        ptr1 += stride/sizeof(*ptr1);
+
+        ptr = s->gmain->data[0];
+        ptr1 = main_data;
+
+        for (i = 0; i < h; i++) {
+            for (j = 0; j < w; j++) {
+                ptr1[j] = (float)ptr[j];
+            }
+            ptr += main_stride/sizeof(*ptr);
+            ptr1 += stride/sizeof(*ptr1);
+        }
     }
 
-    ptr = s->gmain->data[0];
-    ptr1 = main_data;
-
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
-            ptr1[j] = (float)ptr[j];
-        }
-        ptr += main_stride/sizeof(*ptr);
-        ptr1 += stride/sizeof(*ptr1);
-    }
+    int ret = !s->frame_set;
 
     s->frame_set = 0;
 
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    return 0;
+    return ret;
 }
 
 static int read_frame_10bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
 
-    VMAFContext *s = (VMAFContext *)ctx;
-
-    if (s->eof == 1) {
-        s->eof++;
-    }
-    else if (s->eof == 2) {
-        return s->eof;
-    }
+    VMAFContext *s = (VMAFContext *) ctx;
 
     pthread_mutex_lock(&s->lock);
 
-    while (s->frame_set == 0) {
+    while (!s->frame_set && !s->eof) {
         pthread_cond_wait(&s->cond, &s->lock);
     }
 
-    int ref_stride = s->gref->linesize[0];
-    int main_stride = s->gmain->linesize[0];
+    if (s->frame_set) {
 
-    uint16_t *ptr = s->gref->data[0];
-    float *ptr1 = ref_data;
+        int ref_stride = s->gref->linesize[0];
+        int main_stride = s->gmain->linesize[0];
 
-    int h = s->height;
-    int w = s->width;
+        uint16_t *ptr = s->gref->data[0];
+        float *ptr1 = ref_data;
 
-    int i,j;
+        int h = s->height;
+        int w = s->width;
 
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
-            ptr1[j] = (float)ptr[j];
+        int i,j;
+
+        for (i = 0; i < h; i++) {
+            for ( j = 0; j < w; j++) {
+                ptr1[j] = (float)ptr[j];
+            }
+            ptr += ref_stride/sizeof(*ptr);
+            ptr1 += stride/sizeof(*ptr1);
         }
-        ptr += ref_stride / sizeof(*ptr);
-        ptr1 += stride / sizeof(*ptr1);
+
+        ptr = s->gmain->data[0];
+        ptr1 = main_data;
+
+        for (i = 0; i < h; i++) {
+            for (j = 0; j < w; j++) {
+                ptr1[j] = (float)ptr[j];
+            }
+            ptr += main_stride/sizeof(*ptr);
+            ptr1 += stride/sizeof(*ptr1);
+        }
     }
 
-    ptr = s->gmain->data[0];
-    ptr1 = main_data;
-
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
-            ptr1[j] = (float)ptr[j];
-        }
-        ptr += main_stride / sizeof(*ptr);
-        ptr1 += stride / sizeof(*ptr1);
-    }
+    int ret = !s->frame_set;
 
     s->frame_set = 0;
 
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    return 0;
+    return ret;
 }
 
 static void compute_vmaf_score(VMAFContext *s)
 {
-    void *func;
-    if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") || strcmp(s->format, "yuv444p")) {
-        func = read_frame_8bit;
+    int (*read_frame)(float *ref_data, float *main_data, int stride,
+                      double *score, void *ctx);
+
+    if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") ||
+        strcmp(s->format, "yuv444p")) {
+        read_frame = read_frame_8bit;
     }
     else {
-        func = read_frame_10bit;
+        read_frame = read_frame_10bit;
     }
 
-    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, func,
+    s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame,
                                  s->model_path, s->log_path, s->log_fmt,
                                  s->disable_clip, s->disable_avx,
                                  s->enable_transform, s->phone_model,
@@ -227,7 +213,7 @@ static void compute_vmaf_score(VMAFContext *s)
 
 static void *call_vmaf(void *ctx)
 {
-    VMAFContext *s = (VMAFContext *)ctx;
+    VMAFContext *s = (VMAFContext *) ctx;
     compute_vmaf_score(s);
     pthread_exit(NULL);
 }
@@ -257,34 +243,11 @@ static av_cold int init(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
 
-    if (s->stats_file_str) {
-        if (s->stats_version < 2 && s->stats_add_max) {
-            av_log(ctx, AV_LOG_ERROR,
-                   "stats_add_max was specified but stats_version < 2.\n" );
-            return AVERROR(EINVAL);
-        }
-        if (!strcmp(s->stats_file_str, "-")) {
-            s->stats_file = stdout;
-        } else {
-            s->stats_file = fopen(s->stats_file_str, "w");
-            if (!s->stats_file) {
-                int err = AVERROR(errno);
-                char buf[128];
-                av_strerror(err, buf, sizeof(buf));
-                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
-                       s->stats_file_str, buf);
-                return err;
-            }
-        }
-    }
-
     s->gref = av_frame_alloc();
     s->gmain = av_frame_alloc();
 
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init (&s->cond, NULL);
-
-    pthread_attr_init(&s->attr);
 
     s->dinput.process = do_vmaf;
     return 0;
@@ -310,7 +273,7 @@ static int config_input_ref(AVFilterLink *inlink)
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     VMAFContext *s = ctx->priv;
-    s->nb_components = desc->nb_components;
+
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
         av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
@@ -329,7 +292,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    int rc = pthread_create(&s->vmaf_thread, &s->attr, call_vmaf, (void *)s);
+    int rc = pthread_create(&s->vmaf_thread, NULL, call_vmaf, (void *)s);
     if (rc) {
         av_log(ctx, AV_LOG_ERROR, "Thread creation failed.\n");
         return AVERROR(EINVAL);
@@ -375,9 +338,6 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     ff_dualinput_uninit(&s->dinput);
 
-    if (s->stats_file && s->stats_file != stdout)
-        fclose(s->stats_file);
-
     pthread_mutex_lock(&s->lock);
     s->eof = 1;
     pthread_cond_signal(&s->cond);
@@ -388,8 +348,10 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_frame_free(&s->gref);
     av_frame_free(&s->gmain);
 
-    av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
+    pthread_mutex_destroy(&s->lock);
+    pthread_cond_destroy(&s->cond);
 
+    av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
 }
 
 static const AVFilterPad vmaf_inputs[] = {
