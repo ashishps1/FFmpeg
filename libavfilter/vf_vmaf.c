@@ -21,7 +21,7 @@
 
 /**
  * @file
- * Caculate the VMAF between two input videos.
+ * Calculate the VMAF between two input videos.
  */
 
 #include <inttypes.h>
@@ -85,7 +85,8 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static int read_frame_8bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
+static int read_frame_8bit(float *ref_data, float *main_data, int stride,
+                           double *score, void *ctx){
 
     VMAFContext *s = (VMAFContext *) ctx;
 
@@ -138,7 +139,8 @@ static int read_frame_8bit(float *ref_data, float *main_data, int stride, double
     return ret;
 }
 
-static int read_frame_10bit(float *ref_data, float *main_data, int stride, double *score, void *ctx){
+static int read_frame_10bit(float *ref_data, float *main_data, int stride,
+                            double *score, void *ctx){
 
     VMAFContext *s = (VMAFContext *) ctx;
 
@@ -199,8 +201,7 @@ static void compute_vmaf_score(VMAFContext *s)
     if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") ||
         strcmp(s->format, "yuv444p")) {
         read_frame = read_frame_8bit;
-    }
-    else {
+    } else {
         read_frame = read_frame_10bit;
     }
 
@@ -380,7 +381,7 @@ static const AVFilterPad vmaf_outputs[] = {
 
 AVFilter ff_vf_vmaf = {
     .name          = "vmaf",
-    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two videos."),
+    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two video streams."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
