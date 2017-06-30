@@ -85,8 +85,8 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data, int stride,
-                           double *score, void *ctx){
+static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
+                           int stride, double *score, void *ctx){
 
     VMAFContext *s = (VMAFContext *) ctx;
 
@@ -135,16 +135,16 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data, 
 
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
-    
+
     if (ret) {
         return 2;
     }
-    
+
     return 0;
 }
 
-static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data, int stride,
-                            double *score, void *ctx){
+static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
+                            int stride, double *score, void *ctx){
 
     VMAFContext *s = (VMAFContext *) ctx;
 
@@ -197,7 +197,7 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
     if (ret) {
         return 2;
     }
-    
+
     return 0;
 }
 
@@ -205,7 +205,7 @@ static void compute_vmaf_score(VMAFContext *s)
 {
     int (*read_frame)(float *ref_data, float *main_data, int stride,
                       double *score, void *ctx);
-                      
+
     if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") ||
         strcmp(s->format, "yuv444p")) {
         read_frame = read_frame_8bit;
@@ -285,7 +285,8 @@ static int config_input_ref(AVFilterLink *inlink)
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
-        av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
+        av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be
+               same.\n");
         return AVERROR(EINVAL);
     }
     if (ctx->inputs[0]->format != ctx->inputs[1]->format) {
