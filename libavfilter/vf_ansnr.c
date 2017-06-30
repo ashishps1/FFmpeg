@@ -81,8 +81,6 @@ static inline float pow_2(float base)
 static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
                       int w, int h, int ref_stride, int dis_stride)
 {
-    int ref_px_stride = ref_stride / sizeof(float);
-    int dis_px_stride = dis_stride / sizeof(float);
     int i, j;
 
     int ref_ind;
@@ -93,13 +91,15 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
 
     for (i = 0; i < h; ++i) {
         for (j = 0; j < w; ++j) {
-            ref_ind = i * ref_px_stride + j;
-            dis_ind = i * dis_px_stride + j;
+            ref_ind = i * ref_stride + j;
+            dis_ind = i * dis_stride + j;
 
             signal_sum   += pow_2(ref[ref_ind]);
             noise_sum += pow_2(ref[ref_ind] - dis[dis_ind]);
         }
     }
+    
+    printf("noise = %.3f signal = %.3f\n",noise_sum,signal_sum);
 
     if (signal) {
         *signal = signal_sum;
@@ -129,7 +129,6 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
     }
     
     int src_px_stride = src_stride / sizeof(sz);
-    int dst_px_stride = dst_stride / sizeof(float);
 
     float fcoeff, imgcoeff;
     int i, j, fi, fj, ii, jj;
@@ -139,31 +138,37 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
             float accum = 0;
 
             for (fi = 0; fi < fwidth; ++fi) {
-                float accum_inner = 0;
-
+         
                 for (fj = 0; fj < fwidth; ++fj) {
                     fcoeff = f[fi * fwidth + fj];
 
                     ii = i - fwidth / 2 + fi;
                     jj = j - fwidth / 2 + fj;
 
-                    if (ii < 0) ii = -ii;
-                    else if (ii >= h) ii = 2 * h - ii - 1;
-                    if (jj < 0) jj = -jj;
-                    else if (jj >= w) jj = 2 * w - jj - 1;
+                    if (ii < 0) {
+                        ii = -ii;
+                    } else if (ii >= h) {
+                        ii = 2 * h - ii - 1;
+                    }
+                    if (jj < 0) {
+                        jj = -jj;
+                    }
+                    else if (jj >= w) {
+                        jj = 2 * w - jj - 1;
+                    }
+                    
                     if (type == 8) {
                         imgcoeff = src_8bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
                     } else {
                         imgcoeff = src_10bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
                     }
-                    accum_inner += fcoeff * imgcoeff;
+                    
+                    accum += fcoeff * imgcoeff;
                 }
-
-                accum += accum_inner;
             }
             //printf("%.3f\n",accum);
 
-            dst[i * dst_px_stride + j] = accum;
+            dst[i * dst_stride + j] = accum;
             //printf("%.3f\n",dst[i * dst_px_stride + j]);
         }
     }
@@ -188,10 +193,12 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
 
     data_top = (float *) (s->data_buf);
 
-    ref_filtr = (float *)data_top;
+    ref_filtr = (float *) data_top;
     data_top += buf_sz_one;
-    dis_filtd = (float *)data_top;
+    dis_filtd = (float *) data_top;
     data_top += buf_sz_one;
+    
+    buf_stride = buf_stride / sizeof(float);
 
     ansnr_filter2d(ansnr_filter2d_ref, ref, ref_filtr, w, h, ref_stride,
                    buf_stride, ansnr_filter2d_ref_width, s);
