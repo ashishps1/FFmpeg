@@ -42,13 +42,15 @@ typedef struct ANSNRContext {
     int width;
     int height;
     char *format;
+    float *data_buf;
     double ansnr_sum;
-    uint64_t nb_frames;    
+    uint64_t nb_frames;
 } ANSNRContext;
 
 #define OFFSET(x) offsetof(ANSNRContext, x)
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
+#define OPT_RANGE_PIXEL_OFFSET (-128)
 
 const int ansnr_filter2d_ref_width = 3;
 const int ansnr_filter2d_dis_width = 5;
@@ -83,40 +85,50 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
     int dis_px_stride = dis_stride / sizeof(float);
     int i, j;
 
-    float ref_val, dis_val;
+    int ref_ind;
+    int dis_ind;
 
-    float signal_accum = 0;
-    float noise_accum = 0;
-    //printf("\n------------------\n");
+    float signal_sum = 0;
+    float noise_sum = 0;
+
     for (i = 0; i < h; ++i) {
-        float signal_accum_inner = 0;
-        float noise_accum_inner = 0;
-
         for (j = 0; j < w; ++j) {
-            ref_val = ref[i * ref_px_stride + j];
-            dis_val = dis[i * dis_px_stride + j];
-            //printf("%.3f ",ref_val);
-            signal_accum_inner   += pow_2(ref_val);
-            noise_accum_inner += pow_2(ref_val - dis_val);
+            ref_ind = i * ref_px_stride + j;
+            dis_ind = i * dis_px_stride + j;
+
+            signal_sum   += pow_2(ref[ref_ind]);
+            noise_sum += pow_2(ref[ref_ind] - dis[dis_ind]);
         }
-        //printf("\n");
-        signal_accum   += signal_accum_inner;
-        noise_accum += noise_accum_inner;
     }
 
-    //printf("signal = %.3f  noise = %.3f\n",signal_accum,noise_accum);
-
-    if (signal)
-        *signal = signal_accum;
-    if (noise)
-        *noise = noise_accum;
+    if (signal) {
+        *signal = signal_sum;
+    }
+    if (noise) {
+        *noise = noise_sum;
+    }    
 }
 
-static void ansnr_filter2d(const float *f, const uint8_t *src, float *dst,
+static void ansnr_filter2d(const float *f, const void *src, float *dst,
                            int w, int h, int src_stride, int dst_stride,
-                           int fwidth)
+                           int fwidth, ANSNRContext *s)
 {
-    int src_px_stride = src_stride / sizeof(uint8_t);
+    uint8_t type;
+    uint8_t sz;
+    
+    uint8_t *src_8bit = (uint8_t *) src;
+    uint16_t *src_10bit = (uint16_t *) src;
+    
+    if (s->format == "yuv420p" || s->format == "yuv422p" || s->format == "yuv444p"){
+        type = 8;
+        sz = sizeof(uint8_t);
+    }
+    else{
+        type = 10;
+        sz = sizeof(uint16_t);
+    }
+    
+    int src_px_stride = src_stride / sizeof(sz);
     int dst_px_stride = dst_stride / sizeof(float);
 
     float fcoeff, imgcoeff;
@@ -139,7 +151,11 @@ static void ansnr_filter2d(const float *f, const uint8_t *src, float *dst,
                     else if (ii >= h) ii = 2 * h - ii - 1;
                     if (jj < 0) jj = -jj;
                     else if (jj >= w) jj = 2 * w - jj - 1;
-                    imgcoeff = src[ii * src_px_stride + jj];
+                    if (type == 8) {
+                        imgcoeff = src_8bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
+                    } else {
+                        imgcoeff = src_10bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
+                    }
                     accum_inner += fcoeff * imgcoeff;
                 }
 
@@ -153,15 +169,16 @@ static void ansnr_filter2d(const float *f, const uint8_t *src, float *dst,
     }
 }
 
-static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w,
-                         int h, int ref_stride, int dis_stride, double *score,
-                         double *score_psnr, double peak, double psnr_max)
+static int compute_ansnr(const void *ref, const void *dis, int w, int h,
+                         int ref_stride, int dis_stride, double *score,
+                         double *score_psnr, double peak, double psnr_max,
+                         void *ctx)
 {
-    float *data_buf = 0;
+    ANSNRContext *s = (ANSNRContext *) ctx;
+
     char *data_top;
 
     float *ref_filtr;
-    float *ref_filtd;
     float *dis_filtd;
 
     float signal, noise;
@@ -169,43 +186,29 @@ static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w,
     int buf_stride = ALIGN_CEIL(w * sizeof(float));
     size_t buf_sz_one = (size_t)buf_stride * h;
 
-    int ret = 1;
+    data_top = (float *) (s->data_buf);
 
-    if (SIZE_MAX / buf_sz_one < 3)
-    {
-        return AVERROR(EINVAL);
-    }
-
-    if (!(data_buf = av_malloc(buf_sz_one * 3)))
-    {
-        return AVERROR(EINVAL);
-    }
-
-    data_top = (float *)data_buf;
-
-    ref_filtr = (float *)data_top; data_top += buf_sz_one;
-    ref_filtd = (float *)data_top; data_top += buf_sz_one;
-    dis_filtd = (float *)data_top; data_top += buf_sz_one;
+    ref_filtr = (float *)data_top;
+    data_top += buf_sz_one;
+    dis_filtd = (float *)data_top;
+    data_top += buf_sz_one;
 
     ansnr_filter2d(ansnr_filter2d_ref, ref, ref_filtr, w, h, ref_stride,
-                   buf_stride, ansnr_filter2d_ref_width);
-    ansnr_filter2d(ansnr_filter2d_dis, ref, ref_filtd, w, h, ref_stride,
-                   buf_stride, ansnr_filter2d_dis_width);
+                   buf_stride, ansnr_filter2d_ref_width, s);
     ansnr_filter2d(ansnr_filter2d_dis, dis, dis_filtd, w, h, dis_stride,
-                   buf_stride, ansnr_filter2d_dis_width);
+                   buf_stride, ansnr_filter2d_dis_width, s);
 
     ansnr_mse(ref_filtr, dis_filtd, &signal, &noise, w, h, buf_stride,
               buf_stride);
 
-    *score = noise==0 ? psnr_max : 10.0 * log10(signal / noise);
+    *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
 
     double eps = 1e-10;
-    *score_psnr = FFMIN(10 * log10(peak * peak * w * h / FFMAX(noise, eps)),
+    
+    *score_psnr = FFMIN(10 * log10(pow_2(peak) * w * h / FFMAX(noise, eps)),
                         psnr_max);
 
-    ret = 0;
-
-    return ret;
+    return 0;
 }
 
 static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
@@ -215,14 +218,21 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
     char *format = s->format;
 
     double max_psnr;
+    double peak;
+    
+    uint8_t sz;
 
     if (!strcmp(format, "yuv420p") || !strcmp(format, "yuv422p") ||
         !strcmp(format, "yuv444p")) {
+        peak = 255.0;
         max_psnr = 60;
+        sz = sizeof(uint8_t);
     }
     else if (!strcmp(format, "yuv420p10le") || !strcmp(format, "yuv422p10le") ||
              !strcmp(format, "yuv444p10le")) {
+        peak = 255.75;
         max_psnr = 72;
+        sz = sizeof(uint16_t);
     }
 
     double score = 0.0;
@@ -233,20 +243,14 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     double stride;
 
-    stride = ALIGN_CEIL(w * sizeof(uint8_t));
+    stride = ALIGN_CEIL(w * sz);
 
-    uint8_t *ref_data = ref->data[0];
-    uint8_t *main_data = main->data[0];
-
-    //offset_image(ref_data, OPT_RANGE_PIXEL_OFFSET, w, h, stride);
-    //offset_image(main_data, OPT_RANGE_PIXEL_OFFSET, w, h, stride);
-
-    compute_ansnr(ref_data, main_data, w, h, stride, stride, &score,
-                  &score_psnr, 255.75, max_psnr);
+    compute_ansnr(ref->data[0], main->data[0], w, h, stride, stride, &score,
+                  &score_psnr, peak, max_psnr, s);
 
     s->nb_frames++;
 
-    printf("ansnr: %.3f   anpsnr: %.3f\n", score,score_psnr);
+    printf("ansnr: %.3f   anpsnr: %.3f\n", score, score_psnr);
 
     s->ansnr_sum += score;
 
@@ -309,7 +313,20 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
+    
+    int buf_stride = ALIGN_CEIL(s->width * sizeof(float));
+    size_t buf_sz_one = (size_t)buf_stride * s->height;
 
+    if (SIZE_MAX / buf_sz_one < 3) {
+        av_log(ctx, AV_LOG_ERROR, "insufficient size.\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (!(s->data_buf = av_malloc(buf_sz_one * 3))) {
+        av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
+        return AVERROR(EINVAL);
+    }
+    
     return 0;
 }
 
@@ -349,6 +366,8 @@ static av_cold void uninit(AVFilterContext *ctx)
     ANSNRContext *s = ctx->priv;
 
     ff_dualinput_uninit(&s->dinput);
+    
+    av_free(s->data_buf);
 }
 
 static const AVFilterPad ansnr_inputs[] = {
