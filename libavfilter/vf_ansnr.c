@@ -73,6 +73,11 @@ static const AVOption ansnr_options[] = {
 
 AVFILTER_DEFINE_CLASS(ansnr);
 
+static inline double get_ansnr_avg(double ansnr_sum, uint64_t nb_frames)
+{
+    return ansnr_sum / nb_frames;
+}
+
 static inline float pow_2(float base)
 {
     return base*base;
@@ -99,8 +104,6 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
         }
     }
     
-    printf("noise = %.3f signal = %.3f\n",noise_sum,signal_sum);
-
     if (signal) {
         *signal = signal_sum;
     }
@@ -119,26 +122,28 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
     uint8_t *src_8bit = (uint8_t *) src;
     uint16_t *src_10bit = (uint16_t *) src;
     
-    if (s->format == "yuv420p" || s->format == "yuv422p" || s->format == "yuv444p"){
+    int src_px_stride;
+    
+    float fcoeff, imgcoeff;
+    int i, j, fi, fj, ii, jj;    
+
+    if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
+        !strcmp(s->format, "yuv444p")) {
         type = 8;
         sz = sizeof(uint8_t);
     }
-    else{
+    else if (!strcmp(s->format, "yuv420p10le") || !strcmp(s->format, "yuv422p10le") ||
+             !strcmp(s->format, "yuv444p10le")) {
         type = 10;
         sz = sizeof(uint16_t);
     }
     
-    int src_px_stride = src_stride / sizeof(sz);
-
-    float fcoeff, imgcoeff;
-    int i, j, fi, fj, ii, jj;
+    src_px_stride = src_stride / sizeof(sz);
 
     for (i = 0; i < h; ++i) {
         for (j = 0; j < w; ++j) {
             float accum = 0;
-
             for (fi = 0; fi < fwidth; ++fi) {
-         
                 for (fj = 0; fj < fwidth; ++fj) {
                     fcoeff = f[fi * fwidth + fj];
 
@@ -162,14 +167,11 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
                     } else {
                         imgcoeff = src_10bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
                     }
-                    
+              
                     accum += fcoeff * imgcoeff;
                 }
             }
-            //printf("%.3f\n",accum);
-
             dst[i * dst_stride + j] = accum;
-            //printf("%.3f\n",dst[i * dst_px_stride + j]);
         }
     }
 }
@@ -189,14 +191,16 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
     float signal, noise;
 
     int buf_stride = ALIGN_CEIL(w * sizeof(float));
-    size_t buf_sz_one = (size_t)buf_stride * h;
+    size_t buf_sz = (size_t)buf_stride * h;
+    
+    double eps = 1e-10;
 
     data_top = (float *) (s->data_buf);
 
     ref_filtr = (float *) data_top;
-    data_top += buf_sz_one;
+    data_top += buf_sz;
     dis_filtd = (float *) data_top;
-    data_top += buf_sz_one;
+    data_top += buf_sz;
     
     buf_stride = buf_stride / sizeof(float);
 
@@ -209,8 +213,6 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
               buf_stride);
 
     *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
-
-    double eps = 1e-10;
     
     *score_psnr = FFMIN(10 * log10(pow_2(peak) * w * h / FFMAX(noise, eps)),
                         psnr_max);
@@ -223,6 +225,14 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
     ANSNRContext *s = ctx->priv;
 
     char *format = s->format;
+
+    double score = 0.0;
+    double score_psnr = 0;
+
+    int w = s->width;
+    int h = s->height;
+
+    double stride;
 
     double max_psnr;
     double peak;
@@ -242,22 +252,12 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
         sz = sizeof(uint16_t);
     }
 
-    double score = 0.0;
-    double score_psnr = 0;
-
-    int w = s->width;
-    int h = s->height;
-
-    double stride;
-
     stride = ALIGN_CEIL(w * sz);
 
     compute_ansnr(ref->data[0], main->data[0], w, h, stride, stride, &score,
                   &score_psnr, peak, max_psnr, s);
 
     s->nb_frames++;
-
-    printf("ansnr: %.3f   anpsnr: %.3f\n", score, score_psnr);
 
     s->ansnr_sum += score;
 
@@ -271,19 +271,6 @@ static av_cold int init(AVFilterContext *ctx)
     s->dinput.process = do_ansnr;
 
     return 0;
-}
-
-static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
-{
-    char value[128];
-    snprintf(value, sizeof(value), "%0.2f", d);
-    if (comp) {
-        char key2[128];
-        snprintf(key2, sizeof(key2), "%s%c", key, comp);
-        av_dict_set(metadata, key2, value, 0);
-    } else {
-        av_dict_set(metadata, key, value, 0);
-    }
 }
 
 static int query_formats(AVFilterContext *ctx)
@@ -300,12 +287,12 @@ static int query_formats(AVFilterContext *ctx)
     return ff_set_common_formats(ctx, fmts_list);
 }
 
-
 static int config_input_ref(AVFilterLink *inlink)
 {
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     ANSNRContext *s = ctx->priv;
+    int buf_stride;
+    size_t buf_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -321,15 +308,15 @@ static int config_input_ref(AVFilterLink *inlink)
     s->height = ctx->inputs[0]->h;
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
     
-    int buf_stride = ALIGN_CEIL(s->width * sizeof(float));
-    size_t buf_sz_one = (size_t)buf_stride * s->height;
+    buf_stride = ALIGN_CEIL(s->width * sizeof(float));
+    buf_sz = (size_t)buf_stride * s->height;
 
-    if (SIZE_MAX / buf_sz_one < 3) {
+    if (SIZE_MAX / buf_sz < 3) {
         av_log(ctx, AV_LOG_ERROR, "insufficient size.\n");
         return AVERROR(EINVAL);
     }
 
-    if (!(s->data_buf = av_malloc(buf_sz_one * 3))) {
+    if (!(s->data_buf = av_malloc(buf_sz * 3))) {
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(EINVAL);
     }
@@ -375,6 +362,8 @@ static av_cold void uninit(AVFilterContext *ctx)
     ff_dualinput_uninit(&s->dinput);
     
     av_free(s->data_buf);
+    
+    av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", get_ansnr_avg(s->ansnr_sum, s->nb_frames));
 }
 
 static const AVFilterPad ansnr_inputs[] = {
