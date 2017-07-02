@@ -86,9 +86,10 @@ static const AVOption vmaf_options[] = {
 AVFILTER_DEFINE_CLASS(vmaf);
 
 static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
-                           int stride, double *score, void *ctx){
-
+                           int stride, double *score, void *ctx)
+{
     VMAFContext *s = (VMAFContext *) ctx;
+    int ret;
 
     pthread_mutex_lock(&s->lock);
 
@@ -97,7 +98,6 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
     }
 
     if (s->frame_set) {
-
         int ref_stride = s->gref->linesize[0];
         int main_stride = s->gmain->linesize[0];
 
@@ -129,7 +129,7 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
         }
     }
 
-    int ret = !s->frame_set;
+    ret = !s->frame_set;
 
     s->frame_set = 0;
 
@@ -144,9 +144,10 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
 }
 
 static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
-                            int stride, double *score, void *ctx){
-
+                            int stride, double *score, void *ctx)
+{
     VMAFContext *s = (VMAFContext *) ctx;
+    int ret;
 
     pthread_mutex_lock(&s->lock);
 
@@ -155,11 +156,10 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
     }
 
     if (s->frame_set) {
-
         int ref_stride = s->gref->linesize[0];
         int main_stride = s->gmain->linesize[0];
 
-        uint16_t *ptr = s->gref->data[0];
+        uint16_t *ptr = (uint16_t *) s->gref->data[0];
         float *ptr1 = ref_data;
 
         int h = s->height;
@@ -175,7 +175,7 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
             ptr1 += stride/sizeof(*ptr1);
         }
 
-        ptr = s->gmain->data[0];
+        ptr = (uint16_t *) s->gmain->data[0];
         ptr1 = main_data;
 
         for (i = 0; i < h; i++) {
@@ -187,7 +187,7 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
         }
     }
 
-    int ret = !s->frame_set;
+    ret = !s->frame_set;
 
     s->frame_set = 0;
 
@@ -203,11 +203,11 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
 
 static void compute_vmaf_score(VMAFContext *s)
 {
-    int (*read_frame)(float *ref_data, float *main_data, int stride,
-                      double *score, void *ctx);
+    int (*read_frame)(float *ref_data, float *main_data, float *temp_data,
+                      int stride, double *score, void *ctx);
 
-    if (strcmp(s->format, "yuv420p") || strcmp(s->format, "yuv422p") ||
-        strcmp(s->format, "yuv444p")) {
+    if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
+        !strcmp(s->format, "yuv444p")) {
         read_frame = read_frame_8bit;
     } else {
         read_frame = read_frame_10bit;
@@ -279,9 +279,9 @@ static int query_formats(AVFilterContext *ctx)
 
 static int config_input_ref(AVFilterLink *inlink)
 {
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     VMAFContext *s = ctx->priv;
+    int th;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -301,8 +301,8 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    int rc = pthread_create(&s->vmaf_thread, NULL, call_vmaf, (void *)s);
-    if (rc) {
+    th = pthread_create(&s->vmaf_thread, NULL, call_vmaf, (void *)s);
+    if (th) {
         av_log(ctx, AV_LOG_ERROR, "Thread creation failed.\n");
         return AVERROR(EINVAL);
     }
