@@ -112,9 +112,9 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
     }    
 }
 
-static void ansnr_filter2d(const float *f, const void *src, float *dst,
+static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                            int w, int h, int src_stride, int dst_stride,
-                           int fwidth, ANSNRContext *s)
+                           int filt_width, ANSNRContext *s)
 {
     uint8_t type;
     uint8_t sz;
@@ -124,8 +124,8 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
     
     int src_px_stride;
     
-    float fcoeff, imgcoeff;
-    int i, j, fi, fj, ii, jj;    
+    float filt_coeff, img_coeff;
+    int i, j, filt_i, filt_j, src_i, src_j;  
 
     if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
         !strcmp(s->format, "yuv444p")) {
@@ -143,32 +143,29 @@ static void ansnr_filter2d(const float *f, const void *src, float *dst,
     for (i = 0; i < h; ++i) {
         for (j = 0; j < w; ++j) {
             float accum = 0;
-            for (fi = 0; fi < fwidth; ++fi) {
-                for (fj = 0; fj < fwidth; ++fj) {
-                    fcoeff = f[fi * fwidth + fj];
+            for (filt_i = 0; filt_i < filt_width; ++filt_i) {
+                for (filt_j = 0; filt_j < filt_width; ++filt_j) {
+                    filt_coeff = filt[filt_i * filt_width + filt_j];
 
-                    ii = i - fwidth / 2 + fi;
-                    jj = j - fwidth / 2 + fj;
+                    src_i = i - filt_width / 2 + filt_i;
+                    src_j = j - filt_width / 2 + filt_j;
 
-                    if (ii < 0) {
-                        ii = -ii;
-                    } else if (ii >= h) {
-                        ii = 2 * h - ii - 1;
+                    src_i = FFABS(src_i); 
+                    if (src_i >= h) {
+                        src_i = 2 * h - src_i - 1;
                     }
-                    if (jj < 0) {
-                        jj = -jj;
-                    }
-                    else if (jj >= w) {
-                        jj = 2 * w - jj - 1;
+                    src_j = FFABS(src_j);
+                    if (src_j >= w) {
+                        src_j = 2 * w - src_j - 1;
                     }
                     
                     if (type == 8) {
-                        imgcoeff = src_8bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
+                        img_coeff = src_8bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
                     } else {
-                        imgcoeff = src_10bit[ii * src_px_stride + jj] + OPT_RANGE_PIXEL_OFFSET;
+                        img_coeff = src_10bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
                     }
               
-                    accum += fcoeff * imgcoeff;
+                    accum += filt_coeff * img_coeff;
                 }
             }
             dst[i * dst_stride + j] = accum;
@@ -185,31 +182,31 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
 
     char *data_top;
 
-    float *ref_filtr;
-    float *dis_filtd;
+    float *ref_filt;
+    float *dis_filt;
 
     float signal, noise;
 
     int buf_stride = ALIGN_CEIL(w * sizeof(float));
-    size_t buf_sz = (size_t)buf_stride * h;
+    size_t buf_sz = (size_t) (buf_stride * h);
     
     double eps = 1e-10;
 
     data_top = (float *) (s->data_buf);
 
-    ref_filtr = (float *) data_top;
+    ref_filt = (float *) data_top;
     data_top += buf_sz;
-    dis_filtd = (float *) data_top;
+    dis_filt = (float *) data_top;
     data_top += buf_sz;
     
     buf_stride = buf_stride / sizeof(float);
 
-    ansnr_filter2d(ansnr_filter2d_ref, ref, ref_filtr, w, h, ref_stride,
+    ansnr_filter2d(ansnr_filter2d_ref, ref, ref_filt, w, h, ref_stride,
                    buf_stride, ansnr_filter2d_ref_width, s);
-    ansnr_filter2d(ansnr_filter2d_dis, dis, dis_filtd, w, h, dis_stride,
+    ansnr_filter2d(ansnr_filter2d_dis, dis, dis_filt, w, h, dis_stride,
                    buf_stride, ansnr_filter2d_dis_width, s);
 
-    ansnr_mse(ref_filtr, dis_filtd, &signal, &noise, w, h, buf_stride,
+    ansnr_mse(ref_filt, dis_filt, &signal, &noise, w, h, buf_stride,
               buf_stride);
 
     *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
