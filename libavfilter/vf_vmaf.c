@@ -101,8 +101,10 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
         int ref_stride = s->gref->linesize[0];
         int main_stride = s->gmain->linesize[0];
 
-        uint8_t *ptr = s->gref->data[0];
-        float *ptr1 = ref_data;
+        uint8_t *ref_ptr = s->gref->data[0];
+        uint8_t *main_ptr = s->gmain->data[0];
+
+        float *ptr = ref_data;
 
         int h = s->height;
         int w = s->width;
@@ -111,21 +113,20 @@ static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
 
         for (i = 0; i < h; i++) {
             for ( j = 0; j < w; j++) {
-                ptr1[j] = (float)ptr[j];
+                ptr[j] = (float)ref_ptr[j];
             }
-            ptr += ref_stride/sizeof(*ptr);
-            ptr1 += stride/sizeof(*ptr1);
+            ref_ptr += ref_stride / sizeof(*ref_ptr);
+            ptr += stride / sizeof(*ptr);
         }
 
-        ptr = s->gmain->data[0];
-        ptr1 = main_data;
+        ptr = main_data;
 
         for (i = 0; i < h; i++) {
             for (j = 0; j < w; j++) {
-                ptr1[j] = (float)ptr[j];
+                ptr[j] = (float)main_ptr[j];
             }
-            ptr += main_stride/sizeof(*ptr);
-            ptr1 += stride/sizeof(*ptr1);
+            main_ptr += main_stride / sizeof(*main_ptr);
+            ptr += stride / sizeof(*ptr);
         }
     }
 
@@ -159,8 +160,10 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
         int ref_stride = s->gref->linesize[0];
         int main_stride = s->gmain->linesize[0];
 
-        uint16_t *ptr = (uint16_t *) s->gref->data[0];
-        float *ptr1 = ref_data;
+        uint16_t *ref_ptr = (uint16_t *) s->gref->data[0];
+        uint16_t *main_ptr = (uint16_t *) s->gmain->data[0];
+
+        float *ptr = ref_data;
 
         int h = s->height;
         int w = s->width;
@@ -169,21 +172,20 @@ static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
 
         for (i = 0; i < h; i++) {
             for ( j = 0; j < w; j++) {
-                ptr1[j] = (float)ptr[j];
+                ptr[j] = (float)ref_ptr[j];
             }
-            ptr += ref_stride/sizeof(*ptr);
-            ptr1 += stride/sizeof(*ptr1);
+            ref_ptr += ref_stride / sizeof(*ref_ptr);
+            ptr += stride / sizeof(*ptr);
         }
 
-        ptr = (uint16_t *) s->gmain->data[0];
-        ptr1 = main_data;
+        ptr = main_data;
 
         for (i = 0; i < h; i++) {
             for (j = 0; j < w; j++) {
-                ptr1[j] = (float)ptr[j];
+                ptr[j] = (float)main_ptr[j];
             }
-            ptr += main_stride/sizeof(*ptr);
-            ptr1 += stride/sizeof(*ptr1);
+            main_ptr += main_stride / sizeof(*main_ptr);
+            ptr += stride / sizeof(*ptr);
         }
     }
 
@@ -301,7 +303,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    th = pthread_create(&s->vmaf_thread, NULL, call_vmaf, (void *)s);
+    th = pthread_create(&s->vmaf_thread, NULL, call_vmaf, (void *) s);
     if (th) {
         av_log(ctx, AV_LOG_ERROR, "Thread creation failed.\n");
         return AVERROR(EINVAL);
