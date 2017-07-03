@@ -14701,6 +14701,39 @@ vignette='PI/4+random(1)*PI/50':eval=frame
 
 @end itemize
 
+@section vmaf
+
+Obtain the average VMAF (Video Multi-Method Assessment Fusion)
+score between two input videos.
+
+This filter takes in input two input videos, the first input is
+considered the "main" source and is passed unchanged to the
+output. The second input is used as a "reference" video for computing
+the VMAF score.
+
+Both video inputs must have the same resolution and pixel format for
+this filter to work correctly. Also it assumes that both inputs
+have the same number of frames, which are compared one by one.
+
+The obtained average VMAF score is printed through the logging system.
+
+Currently it requires Netflix's vmaf library (libvmaf) as a pre-requisite.
+It can be enabled using --enable-libvmaf at ./configure ..
+If no model path is not specified it uses default model.
+
+For example:
+@example
+ffmpeg -i main.mpg -i ref.mpg -lavfi vmaf -f null -
+@end example
+
+Example with options:
+@example
+ffmpeg -i main.mpg -i ref.mpg -lavfi vmaf="psnr=1:enable-transform=1" -f null -
+@end example
+
+On this example the input file @file{main.mpg} being processed is compared with the
+reference file @file{ref.mpg}.
+
 @section vstack
 Stack input videos vertically.
 
