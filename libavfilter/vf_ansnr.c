@@ -21,7 +21,7 @@
 
 /**
  * @file
- * Calculate the Anti-Noise Singnal to Noise Ratio (ANSNR) between two input videos.
+ * Calculate Anti-Noise Singnal to Noise Ratio (ANSNR) between two input videos.
  */
 
 #include <inttypes.h>
@@ -241,13 +241,13 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
     if (!strcmp(format, "yuv420p") || !strcmp(format, "yuv422p") ||
         !strcmp(format, "yuv444p")) {
         peak = 255.0;
-        max_psnr = 60;
+        max_psnr = 60.0;
         sz = sizeof(uint8_t);
     }
     else if (!strcmp(format, "yuv420p10le") || !strcmp(format, "yuv422p10le") ||
              !strcmp(format, "yuv444p10le")) {
         peak = 255.75;
-        max_psnr = 72;
+        max_psnr = 72.0;
         sz = sizeof(uint16_t);
     }
 
