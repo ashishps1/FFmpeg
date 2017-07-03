@@ -103,13 +103,13 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
             noise_sum += pow_2(ref[ref_ind] - dis[dis_ind]);
         }
     }
-    
+
     if (signal) {
         *signal = signal_sum;
     }
     if (noise) {
         *noise = noise_sum;
-    }    
+    }
 }
 
 static void ansnr_filter2d(const float *filt, const void *src, float *dst,
@@ -118,14 +118,14 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
 {
     uint8_t type;
     uint8_t sz;
-    
+
     uint8_t *src_8bit = (uint8_t *) src;
     uint16_t *src_10bit = (uint16_t *) src;
-    
+
     int src_px_stride;
-    
+
     float filt_coeff, img_coeff;
-    int i, j, filt_i, filt_j, src_i, src_j;  
+    int i, j, filt_i, filt_j, src_i, src_j;
 
     if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
         !strcmp(s->format, "yuv444p")) {
@@ -137,7 +137,7 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
         type = 10;
         sz = sizeof(uint16_t);
     }
-    
+
     src_px_stride = src_stride / sizeof(sz);
 
     for (i = 0; i < h; ++i) {
@@ -150,7 +150,7 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                     src_i = i - filt_width / 2 + filt_i;
                     src_j = j - filt_width / 2 + filt_j;
 
-                    src_i = FFABS(src_i); 
+                    src_i = FFABS(src_i);
                     if (src_i >= h) {
                         src_i = 2 * h - src_i - 1;
                     }
@@ -158,13 +158,13 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                     if (src_j >= w) {
                         src_j = 2 * w - src_j - 1;
                     }
-                    
+
                     if (type == 8) {
                         img_coeff = src_8bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
                     } else {
                         img_coeff = src_10bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
                     }
-              
+
                     accum += filt_coeff * img_coeff;
                 }
             }
@@ -189,7 +189,7 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
 
     int buf_stride = ALIGN_CEIL(w * sizeof(float));
     size_t buf_sz = (size_t) (buf_stride * h);
-    
+
     double eps = 1e-10;
 
     data_top = (float *) (s->data_buf);
@@ -198,7 +198,7 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
     data_top += buf_sz;
     dis_filt = (float *) data_top;
     data_top += buf_sz;
-    
+
     buf_stride = buf_stride / sizeof(float);
 
     ansnr_filter2d(ansnr_filter2d_ref, ref, ref_filt, w, h, ref_stride,
@@ -210,7 +210,7 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
               buf_stride);
 
     *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
-    
+
     *score_psnr = FFMIN(10 * log10(pow_2(peak) * w * h / FFMAX(noise, eps)),
                         psnr_max);
 
@@ -233,7 +233,7 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     double max_psnr;
     double peak;
-    
+
     uint8_t sz;
 
     if (!strcmp(format, "yuv420p") || !strcmp(format, "yuv422p") ||
@@ -304,7 +304,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
     s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
-    
+
     buf_stride = ALIGN_CEIL(s->width * sizeof(float));
     buf_sz = (size_t)buf_stride * s->height;
 
@@ -317,7 +317,7 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(EINVAL);
     }
-    
+
     return 0;
 }
 
@@ -357,9 +357,9 @@ static av_cold void uninit(AVFilterContext *ctx)
     ANSNRContext *s = ctx->priv;
 
     ff_dualinput_uninit(&s->dinput);
-    
+
     av_free(s->data_buf);
-    
+
     av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", get_ansnr_avg(s->ansnr_sum, s->nb_frames));
 }
 
@@ -389,7 +389,7 @@ static const AVFilterPad ansnr_outputs[] = {
 
 AVFilter ff_vf_ansnr = {
     .name          = "ansnr",
-    .description   = NULL_IF_CONFIG_SMALL("Calculate the PSNR between two video streams."),
+    .description   = NULL_IF_CONFIG_SMALL("Calculate the ANSNR between two video streams."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
