@@ -19,14 +19,11 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVFILTER_PSNR_H
-#define AVFILTER_PSNR_H
-
-#include <stddef.h>
-#include <stdint.h>
+#ifndef AVFILTER_ANSNR_H
+#define AVFILTER_ANSNR_H
 
 static int compute_ansnr(const void *ref, const void *dis, int w,
                          int h, int ref_stride, int dis_stride, double *score,
                          double *score_psnr, double peak, double psnr_max, void *ctx);
 
-#endif /* AVFILTER_PSNR_H */
+#endif /* AVFILTER_ANSNR_H */

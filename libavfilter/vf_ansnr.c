@@ -21,7 +21,7 @@
 
 /**
  * @file
- * Calculate the ANSNR between two input videos.
+ * Calculate the Anti-Noise Singnal to Noise Ratio (ANSNR) between two input videos.
  */
 
 #include <inttypes.h>
@@ -60,11 +60,11 @@ const float ansnr_filter2d_ref[3 * 3] = {
     1.0 / 16.0, 2.0 / 16.0, 1.0 / 16.0
 };
 const float ansnr_filter2d_dis[5 * 5] = {
-    2.0 / 571.0,  7.0 / 571.0,  12.0 / 571.0,  7.0 / 571.0,  2.0 / 571.0,
-    7.0 / 571.0,  31.0 / 571.0, 52.0 / 571.0,  31.0 / 571.0, 7.0 / 571.0,
+     2.0 / 571.0,  7.0 / 571.0,  12.0 / 571.0,  7.0 / 571.0,  2.0 / 571.0,
+     7.0 / 571.0, 31.0 / 571.0,  52.0 / 571.0, 31.0 / 571.0,  7.0 / 571.0,
     12.0 / 571.0, 52.0 / 571.0, 127.0 / 571.0, 52.0 / 571.0, 12.0 / 571.0,
-    7.0 / 571.0,  31.0 / 571.0, 52.0 / 571.0,  31.0 / 571.0, 7.0 / 571.0,
-    2.0 / 571.0,  7.0 / 571.0,  12.0 / 571.0,  7.0 / 571.0,  2.0 / 571.0
+     7.0 / 571.0, 31.0 / 571.0,  52.0 / 571.0, 31.0 / 571.0,  7.0 / 571.0,
+     2.0 / 571.0,  7.0 / 571.0,  12.0 / 571.0,  7.0 / 571.0,  2.0 / 571.0
 };
 
 static const AVOption ansnr_options[] = {
@@ -94,12 +94,12 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
     float signal_sum = 0;
     float noise_sum = 0;
 
-    for (i = 0; i < h; ++i) {
-        for (j = 0; j < w; ++j) {
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
             ref_ind = i * ref_stride + j;
             dis_ind = i * dis_stride + j;
 
-            signal_sum   += pow_2(ref[ref_ind]);
+            signal_sum += pow_2(ref[ref_ind]);
             noise_sum += pow_2(ref[ref_ind] - dis[dis_ind]);
         }
     }
@@ -132,8 +132,8 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
         type = 8;
         sz = sizeof(uint8_t);
     }
-    else if (!strcmp(s->format, "yuv420p10le") || !strcmp(s->format, "yuv422p10le") ||
-             !strcmp(s->format, "yuv444p10le")) {
+    else if (!strcmp(s->format, "yuv420p10le") || !strcmp(s->format,
+             "yuv422p10le") || !strcmp(s->format, "yuv444p10le")) {
         type = 10;
         sz = sizeof(uint16_t);
     }
@@ -143,8 +143,8 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
     for (i = 0; i < h; ++i) {
         for (j = 0; j < w; ++j) {
             float accum = 0;
-            for (filt_i = 0; filt_i < filt_width; ++filt_i) {
-                for (filt_j = 0; filt_j < filt_width; ++filt_j) {
+            for (filt_i = 0; filt_i < filt_width; filt_i++) {
+                for (filt_j = 0; filt_j < filt_width; filt_j++) {
                     filt_coeff = filt[filt_i * filt_width + filt_j];
 
                     src_i = i - filt_width / 2 + filt_i;
@@ -160,9 +160,11 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                     }
 
                     if (type == 8) {
-                        img_coeff = src_8bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
+                        img_coeff = src_8bit[src_i * src_px_stride + src_j] +
+                            OPT_RANGE_PIXEL_OFFSET;
                     } else {
-                        img_coeff = src_10bit[src_i * src_px_stride + src_j] + OPT_RANGE_PIXEL_OFFSET;
+                        img_coeff = src_10bit[src_i * src_px_stride + src_j] +
+                            OPT_RANGE_PIXEL_OFFSET;
                     }
 
                     accum += filt_coeff * img_coeff;
@@ -211,7 +213,7 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
 
     *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
 
-    *score_psnr = FFMIN(10 * log10(pow_2(peak) * w * h / FFMAX(noise, eps)),
+    *score_psnr = FFMIN(10.0 * log10(pow_2(peak) * w * h / FFMAX(noise, eps)),
                         psnr_max);
 
     return 0;
@@ -224,7 +226,7 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
     char *format = s->format;
 
     double score = 0.0;
-    double score_psnr = 0;
+    double score_psnr = 0.0;
 
     int w = s->width;
     int h = s->height;
@@ -360,7 +362,8 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_free(s->data_buf);
 
-    av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", get_ansnr_avg(s->ansnr_sum, s->nb_frames));
+    av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", get_ansnr_avg(s->ansnr_sum,
+                                                                s->nb_frames));
 }
 
 static const AVFilterPad ansnr_inputs[] = {
