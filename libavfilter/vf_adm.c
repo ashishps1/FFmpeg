@@ -61,7 +61,6 @@ typedef struct adm_dwt_band_t {
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 #define M_PI 3.1415926535897932384626433832795028841971693993751
-/* Percentage of frame to discard on all 4 sides */
 #define ADM_BORDER_FACTOR (0.1)
 
 static const float dwt2_db2_coeffs_lo[4] = { 0.482962913144690, 0.836516303737469, 0.224143868041857, -0.129409522550921 };
@@ -106,12 +105,14 @@ static inline double get_adm_avg(double ansnr_sum, uint64_t nb_frames)
     return ansnr_sum / nb_frames;
 }
 
-static inline float dwt_quant_step(const struct dwt_model_params *params, int lambda, int theta)
+static inline float dwt_quant_step(const struct dwt_model_params *params,
+                                   int lambda, int theta)
 {
     float r = VIEW_DIST * REF_DISPLAY_HEIGHT * M_PI / 180.0;
 
-    float temp = log10(pow(2.0,lambda+1)*params->f0*params->g[theta]/r);
-    float Q = 2.0*params->a*pow(10.0,params->k*temp*temp)/dwt_7_9_basis_function_amplitudes[lambda][theta];
+    float temp = log10(pow(2.0, lambda+1) * params->f0 * params->g[theta] / r);
+    float Q = 2.0 * params->a * pow(10.0, params->k * temp * temp) /
+        dwt_7_9_basis_function_amplitudes[lambda][theta];
 
     return Q;
 }
@@ -122,7 +123,8 @@ static const AVOption adm_options[] = {
 
 AVFILTER_DEFINE_CLASS(adm);
 
-static float adm_sum_cube(const float *x, int w, int h, int stride, double border_factor)
+static float adm_sum_cube(const float *x, int w, int h, int stride,
+                          double border_factor)
 {
     int px_stride = stride / sizeof(float);
     int left   = w * border_factor - 0.5;
@@ -147,10 +149,14 @@ static float adm_sum_cube(const float *x, int w, int h, int stride, double borde
         accum += accum_inner;
     }
 
-    return powf(accum, 1.0f / 3.0f) + powf((bottom - top) * (right - left) / 32.0f, 1.0f / 3.0f);
+    return powf(accum, 1.0f / 3.0f) + powf((bottom - top) * (right - left) /
+                                           32.0f, 1.0f / 3.0f);
 }
 
-static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis, const adm_dwt_band_t *r, const adm_dwt_band_t *a, int w, int h, int ref_stride, int dis_stride, int r_stride, int a_stride)
+static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis,
+                         const adm_dwt_band_t *r, const adm_dwt_band_t *a,
+                         int w, int h, int ref_stride, int dis_stride,
+                         int r_stride, int a_stride)
 {
     const float cos_1deg_sq = cos(1.0 * M_PI / 180.0) * cos(1.0 * M_PI / 180.0);
     const float eps = 1e-30;
@@ -193,7 +199,8 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis, c
             o_mag_sq = oh * oh + ov * ov;
             t_mag_sq = th * th + tv * tv;
 
-            angle_flag = (ot_dp >= 0.0f) && (ot_dp * ot_dp >= cos_1deg_sq * o_mag_sq * t_mag_sq);
+            angle_flag = (ot_dp >= 0.0f) && (ot_dp * ot_dp >= cos_1deg_sq *
+                                             o_mag_sq * t_mag_sq);
 
             if (angle_flag) {
                 tmph = th;
@@ -212,7 +219,9 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis, c
     }
 }
 
-static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst, int orig_h, int scale, int w, int h, int src_stride, int dst_stride)
+static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
+                    int orig_h, int scale, int w, int h, int src_stride,
+                    int dst_stride)
 {
     const float *src_angles[3] = { src->band_h, src->band_v, src->band_d };
     float *dst_angles[3]       = { dst->band_h, dst->band_v, dst->band_d };
@@ -235,13 +244,15 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst, int or
 
         for (i = 0; i < h; ++i) {
             for (j = 0; j < w; ++j) {
-                dst_ptr[i * dst_px_stride + j] = rfactor[theta] * src_ptr[i * src_px_stride + j];
+                dst_ptr[i * dst_px_stride + j] = rfactor[theta] *
+                    src_ptr[i * src_px_stride + j];
             }
         }
     }
 }
 
-static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h, int src_stride, int dst_stride)
+static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
+                          int src_stride, int dst_stride)
 {
     const float *angles[3] = { src->band_h, src->band_v, src->band_d };
     const float *src_ptr;
@@ -267,7 +278,8 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h, i
 
                 for (fi = 0; fi < 3; ++fi) {
                     for (fj = 0; fj < 3; ++fj) {
-                        fcoeff = (fi == 1 && fj == 1) ? 1.0f / 15.0f : 1.0f / 30.0f;
+                        fcoeff = (fi == 1 && fj == 1) ? 1.0f / 15.0f : 1.0f /
+                            30.0f;
 
                         ii = i - 1 + fi;
                         jj = j - 1 + fj;
@@ -292,7 +304,9 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h, i
     }
 }
 
-static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst, const float *thresh, int w, int h, int src_stride, int dst_stride, int thresh_stride)
+static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
+                   const float *thresh, int w, int h, int src_stride,
+                   int dst_stride, int thresh_stride)
 {
     int src_px_stride = src_stride / sizeof(float);
     int dst_px_stride = dst_stride / sizeof(float);
@@ -324,7 +338,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst, const f
     }
 }
 
-static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h, int src_stride, int dst_stride)
+static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
+                     int src_stride, int dst_stride)
 {
     const float *filter_lo = dwt2_db2_coeffs_lo;
     const float *filter_hi = dwt2_db2_coeffs_hi;
@@ -423,7 +438,8 @@ static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h, 
     av_free(tmphi);
 }
 
-static void adm_buffer_copy(const void *src, void *dst, int linewidth, int h, int src_stride, int dst_stride)
+static void adm_buffer_copy(const void *src, void *dst, int linewidth, int h,
+                            int src_stride, int dst_stride)
 {
     const char *src_p = src;
     char *dst_p = dst;
@@ -449,10 +465,13 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
     return data_top;
 }
 
-static int compute_adm(const float *ref, const float *dis, int w, int h, int ref_stride, int dis_stride, double *score, double *score_num, double *score_den, double *scores, double border_factor, ADMContext *s)
+int compute_adm(const float *ref, const float *dis, int w, int h,
+                       int ref_stride, int dis_stride, double *score,
+                       double *score_num, double *score_den, double *scores,
+                       double border_factor, ADMContext *s)
 {
     double numden_limit = 1e-2 * (w * h) / (1920.0 * 1080.0);
-    float *data_buf = 0;
+    
     char *data_top;
 
     float *ref_scale;
@@ -511,7 +530,6 @@ static int compute_adm(const float *ref, const float *dis, int w, int h, int ref
     for (scale = 0; scale < 4; ++scale) {
         float num_scale = 0.0;
         float den_scale = 0.0;
-        static int p =0;
 
         adm_dwt2(curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride);
         adm_dwt2(curr_dis_scale, &dis_dwt2, w, h, curr_dis_stride, buf_stride);
@@ -519,7 +537,8 @@ static int compute_adm(const float *ref, const float *dis, int w, int h, int ref
         w = (w + 1) / 2;
         h = (h + 1) / 2;
 
-        adm_decouple(&ref_dwt2, &dis_dwt2, &decouple_r, &decouple_a, w, h, buf_stride, buf_stride, buf_stride, buf_stride);
+        adm_decouple(&ref_dwt2, &dis_dwt2, &decouple_r, &decouple_a, w, h,
+                     buf_stride, buf_stride, buf_stride, buf_stride);
 
         adm_csf(&ref_dwt2, &csf_o, orig_h, scale, w, h, buf_stride, buf_stride);
         adm_csf(&decouple_r, &csf_r, orig_h, scale, w, h, buf_stride, buf_stride);
@@ -539,9 +558,10 @@ static int compute_adm(const float *ref, const float *dis, int w, int h, int ref
         num += num_scale;
         den += den_scale;
 
-        /* Copy DWT2 approximation band to buffer for next scale. */
-        adm_buffer_copy(ref_dwt2.band_a, ref_scale, w * sizeof(float), h, buf_stride, buf_stride);
-        adm_buffer_copy(dis_dwt2.band_a, dis_scale, w * sizeof(float), h, buf_stride, buf_stride);
+        adm_buffer_copy(ref_dwt2.band_a, ref_scale, w * sizeof(float), h,
+                        buf_stride, buf_stride);
+        adm_buffer_copy(dis_dwt2.band_a, dis_scale, w * sizeof(float), h,
+                        buf_stride, buf_stride);
 
         curr_ref_scale = ref_scale;
         curr_dis_scale = dis_scale;
@@ -575,12 +595,12 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     ADMContext *s = ctx->priv;
 
-    char *format = s->format;
-
     double score = 0.0;
     double score_num = 0;
     double score_den = 0;
     double scores[2*4];
+    
+    int i,j;
 
     int w = s->width;
     int h = s->height;
@@ -588,25 +608,32 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int stride;
     size_t data_sz;
 
+    int ref_stride;
+    int main_stride;
+    
+    float *ref_data;
+    float *main_data;   
+    
+    float *ref_data_ptr;
+    float *main_data_ptr; 
+    
+    uint8_t *ref_ptr;
+    uint8_t *main_ptr;
+    
     stride = ALIGN_CEIL(w * sizeof(float));
     data_sz = (size_t)stride * h;
 
-    uint8_t *ref_ptr = ref->data[0];
-    uint8_t *main_ptr = main->data[0];
+    ref_ptr = ref->data[0];
+    main_ptr = main->data[0];
 
-    int ref_stride = ref->linesize[0];
-    int main_stride = main->linesize[0];
-
-    float *ref_data;
-    float *main_data;
+    ref_stride = ref->linesize[0];
+    main_stride = main->linesize[0];
 
     ref_data = av_malloc(data_sz);
     main_data = av_malloc(data_sz);
 
-    int i,j;
-
-    float *ref_data_ptr = ref_data;
-    float *main_data_ptr = main_data;
+    ref_data_ptr = ref_data;
+    main_data_ptr = main_data;
 
     for(i=0;i<h;i++){
         for(j=0;j<w;j++){
@@ -732,7 +759,8 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_free(s->data_buf);
 
-    av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", get_adm_avg(s->adm_sum, s->nb_frames));
+    av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", get_adm_avg(s->adm_sum,
+                                                            s->nb_frames));
 }
 
 static const AVFilterPad adm_inputs[] = {
