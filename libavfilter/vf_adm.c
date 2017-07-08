@@ -75,14 +75,7 @@ static float rcp(float x)
 
 #define DIVS(n, d) ((n) * rcp(d))
 
-/* ================= */
-/* Noise floor model */
-/* ================= */
-
 #define VIEW_DIST 3.0f
-//#define VIEW_DIST 4.0f
-//#define VIEW_DIST 5.0f
-//#define VIEW_DIST 6.0f
 
 #define REF_DISPLAY_HEIGHT 1080
 
@@ -107,6 +100,11 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
     { 0.045943, 0.059758, 0.077727, 0.059758 },
     { 0.023013, 0.030018, 0.039156, 0.030018 }
 };
+
+static inline double get_adm_avg(double ansnr_sum, uint64_t nb_frames)
+{
+    return ansnr_sum / nb_frames;
+}
 
 static inline float dwt_quant_step(const struct dwt_model_params *params, int lambda, int theta)
 {
@@ -156,7 +154,7 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis, c
 {
     const float cos_1deg_sq = cos(1.0 * M_PI / 180.0) * cos(1.0 * M_PI / 180.0);
     const float eps = 1e-30;
-    
+
     int ref_px_stride = ref_stride / sizeof(float);
     int dis_px_stride = dis_stride / sizeof(float);
     int r_px_stride = r_stride / sizeof(float);
@@ -182,15 +180,15 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *dis, c
             kd = DIVS(td, od + eps);
 
             kh = kh < 0.0f ? 0.0f : (kh > 1.0f ? 1.0f : kh);
- 
-  
+
+
             kv = kv < 0.0f ? 0.0f : (kv > 1.0f ? 1.0f : kv);
             kd = kd < 0.0f ? 0.0f : (kd > 1.0f ? 1.0f : kd);
 
             tmph = kh * oh;
             tmpv = kv * ov;
             tmpd = kd * od;
-            
+
             ot_dp = oh * th + ov * tv;
             o_mag_sq = oh * oh + ov * ov;
             t_mag_sq = th * th + tv * tv;
@@ -267,7 +265,6 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h, i
             for (j = 0; j < w; ++j) {
                 float accum = 0;
 
-                /* Mean of three convolutions by [1 1 1; 1 2 1; 1 1 1]. */
                 for (fi = 0; fi < 3; ++fi) {
                     for (fj = 0; fj < 3; ++fj) {
                         fcoeff = (fi == 1 && fj == 1) ? 1.0f / 15.0f : 1.0f / 30.0f;
@@ -275,7 +272,6 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h, i
                         ii = i - 1 + fi;
                         jj = j - 1 + fj;
 
-                        /* Border handling by mirroring. */
                         if (ii < 0)
                             ii = -ii;
                         else if (ii >= h)
@@ -328,13 +324,13 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst, const f
     }
 }
 
-static void adm_dwt2(const uint8_t *src, const adm_dwt_band_t *dst, int w, int h, int src_stride, int dst_stride)
+static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h, int src_stride, int dst_stride)
 {
     const float *filter_lo = dwt2_db2_coeffs_lo;
     const float *filter_hi = dwt2_db2_coeffs_hi;
     int fwidth = sizeof(dwt2_db2_coeffs_lo) / sizeof(float);
 
-    int src_px_stride = src_stride / sizeof(uint8_t);
+    int src_px_stride = src_stride / sizeof(float);
     int dst_px_stride = dst_stride / sizeof(float);
 
     float *tmplo = av_malloc(ALIGN_CEIL(sizeof(float) * w));
@@ -353,15 +349,14 @@ static void adm_dwt2(const uint8_t *src, const adm_dwt_band_t *dst, int w, int h
                 fcoeff_lo = filter_lo[fi];
                 fcoeff_hi = filter_hi[fi];
 
-                /* Border handling by mirroring. */
                 ii = 2 * i - 1 + fi;
 
                 if (ii < 0)
                     ii = -ii;
                 else if (ii >= h)
                     ii = 2 * h - ii - 1;
-                
-                imgcoeff = src[ii * src_px_stride + j] + OPT_RANGE_PIXEL_OFFSET;
+
+                imgcoeff = src[ii * src_px_stride + j];
 
                 accum_lo += fcoeff_lo * imgcoeff;
                 accum_hi += fcoeff_hi * imgcoeff;
@@ -370,7 +365,7 @@ static void adm_dwt2(const uint8_t *src, const adm_dwt_band_t *dst, int w, int h
             tmplo[j] = accum_lo;
             tmphi[j] = accum_hi;
         }
-        
+
         /* Horizontal pass (lo). */
         for (j = 0; j < (w + 1) / 2; j++) {
             float accum_lo = 0;
@@ -380,7 +375,6 @@ static void adm_dwt2(const uint8_t *src, const adm_dwt_band_t *dst, int w, int h
                 fcoeff_lo = filter_lo[fj];
                 fcoeff_hi = filter_hi[fj];
 
-                /* Border handling by mirroring. */
                 jj = 2 * j - 1 + fj;
 
                 if (jj < 0)
@@ -407,7 +401,6 @@ static void adm_dwt2(const uint8_t *src, const adm_dwt_band_t *dst, int w, int h
                 fcoeff_lo = filter_lo[fj];
                 fcoeff_hi = filter_hi[fj];
 
-                /* Border handling by mirroring. */
                 jj = 2 * j - 1 + fj;
 
                 if (jj < 0)
@@ -456,14 +449,14 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
     return data_top;
 }
 
-static int compute_adm(const uint8_t *ref, const uint8_t *dis, int w, int h, int ref_stride, int dis_stride, double *score, double *score_num, double *score_den, double *scores, double border_factor, ADMContext *s)
+static int compute_adm(const float *ref, const float *dis, int w, int h, int ref_stride, int dis_stride, double *score, double *score_num, double *score_den, double *scores, double border_factor, ADMContext *s)
 {
     double numden_limit = 1e-2 * (w * h) / (1920.0 * 1080.0);
     float *data_buf = 0;
     char *data_top;
 
-    uint8_t *ref_scale;
-    uint8_t *dis_scale;
+    float *ref_scale;
+    float *dis_scale;
 
     adm_dwt_band_t ref_dwt2;
     adm_dwt_band_t dis_dwt2;
@@ -479,8 +472,8 @@ static int compute_adm(const uint8_t *ref, const uint8_t *dis, int w, int h, int
 
     adm_dwt_band_t cm_r;
 
-    const uint8_t *curr_ref_scale = ref;
-    const uint8_t *curr_dis_scale = dis;
+    const float *curr_ref_scale = (float *)ref;
+    const float *curr_dis_scale = (float *)dis;
     int curr_ref_stride = ref_stride;
     int curr_dis_stride = dis_stride;
 
@@ -519,20 +512,14 @@ static int compute_adm(const uint8_t *ref, const uint8_t *dis, int w, int h, int
         float num_scale = 0.0;
         float den_scale = 0.0;
         static int p =0;
-    
+
         adm_dwt2(curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride);
         adm_dwt2(curr_dis_scale, &dis_dwt2, w, h, curr_dis_stride, buf_stride);
-        
-        //printf("\n---------------------After dwt2\n");
-        //printf("%.3f %.3f %.3f %.3f",ref_dwt2.band_a,ref_dwt2.band_h,ref_dwt2.band_v,ref_dwt2.band_d);
 
         w = (w + 1) / 2;
         h = (h + 1) / 2;
 
         adm_decouple(&ref_dwt2, &dis_dwt2, &decouple_r, &decouple_a, w, h, buf_stride, buf_stride, buf_stride, buf_stride);
-        //printf("\n---------------------After decouple\n");
-        //printf("%.3f %.3f %.3f %.3f",ref_dwt2.band_a,ref_dwt2.band_h,ref_dwt2.band_v,ref_dwt2.band_d);
-        //printf("%.3f %.3f %.3f %.3f",decouple_r.band_a,decouple_r.band_h,decouple_r.band_v,decouple_r.band_d);
 
         adm_csf(&ref_dwt2, &csf_o, orig_h, scale, w, h, buf_stride, buf_stride);
         adm_csf(&decouple_r, &csf_r, orig_h, scale, w, h, buf_stride, buf_stride);
@@ -551,8 +538,6 @@ static int compute_adm(const uint8_t *ref, const uint8_t *dis, int w, int h, int
 
         num += num_scale;
         den += den_scale;
-        printf("\n---------------------After num\n");
-        printf("%.3f %.3f",num_scale,den_scale);
 
         /* Copy DWT2 approximation band to buffer for next scale. */
         adm_buffer_copy(ref_dwt2.band_a, ref_scale, w * sizeof(float), h, buf_stride, buf_stride);
@@ -582,7 +567,7 @@ static int compute_adm(const uint8_t *ref, const uint8_t *dis, int w, int h, int
     *score_den = den;
 
     ret = 0;
-    
+
     return ret;
 }
 
@@ -600,17 +585,50 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int w = s->width;
     int h = s->height;
 
-    double stride;
+    int stride;
+    size_t data_sz;
 
-    stride = ALIGN_CEIL(w * sizeof(uint8_t));
+    stride = ALIGN_CEIL(w * sizeof(float));
+    data_sz = (size_t)stride * h;
 
-    compute_adm(ref->data[0], main->data[0], w, h, stride, stride, &score,
+    uint8_t *ref_ptr = ref->data[0];
+    uint8_t *main_ptr = main->data[0];
+
+    int ref_stride = ref->linesize[0];
+    int main_stride = main->linesize[0];
+
+    float *ref_data;
+    float *main_data;
+
+    ref_data = av_malloc(data_sz);
+    main_data = av_malloc(data_sz);
+
+    int i,j;
+
+    float *ref_data_ptr = ref_data;
+    float *main_data_ptr = main_data;
+
+    for(i=0;i<h;i++){
+        for(j=0;j<w;j++){
+            ref_data_ptr[j] = (float)ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
+            main_data_ptr[j] = (float)main_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
+        }
+        ref_data_ptr += stride / sizeof(float);
+        main_data_ptr += stride / sizeof(float);
+        ref_ptr += ref_stride / sizeof(uint8_t);
+        main_ptr += main_stride / sizeof(uint8_t);
+    }
+
+
+    compute_adm(ref_data, main_data, w, h, stride, stride, &score,
                 &score_num, &score_den, &scores, ADM_BORDER_FACTOR, s);
 
-    printf("score: %.3f score_num: %.3f score_den: %.3f\n", score,score_num,score_den);
     s->nb_frames++;
 
     s->adm_sum += score;
+
+    av_free(ref_data);
+    av_free(main_data);
 
     return main;
 }
@@ -714,7 +732,7 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     av_free(s->data_buf);
 
-    //av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", get_adm_avg(s->ansnr_sum, s->nb_frames));
+    av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", get_adm_avg(s->adm_sum, s->nb_frames));
 }
 
 static const AVFilterPad adm_inputs[] = {
