@@ -42,6 +42,7 @@ typedef struct ANSNRContext {
     int width;
     int height;
     char *format;
+    uint8_t type;
     float *data_buf;
     double ansnr_sum;
     uint64_t nb_frames;
@@ -116,7 +117,6 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                            int w, int h, int src_stride, int dst_stride,
                            int filt_width, ANSNRContext *s)
 {
-    uint8_t type;
     uint8_t sz;
 
     uint8_t *src_8bit = (uint8_t *) src;
@@ -127,14 +127,10 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
     float filt_coeff, img_coeff;
     int i, j, filt_i, filt_j, src_i, src_j;
 
-    if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
-        !strcmp(s->format, "yuv444p")) {
-        type = 8;
+    if (s->type == 8) {
         sz = sizeof(uint8_t);
     }
-    else if (!strcmp(s->format, "yuv420p10le") || !strcmp(s->format,
-             "yuv422p10le") || !strcmp(s->format, "yuv444p10le")) {
-        type = 10;
+    else if (s->type == 10) {
         sz = sizeof(uint16_t);
     }
 
@@ -159,7 +155,7 @@ static void ansnr_filter2d(const float *filt, const void *src, float *dst,
                         src_j = 2 * w - src_j - 1;
                     }
 
-                    if (type == 8) {
+                    if (s->type == 8) {
                         img_coeff = src_8bit[src_i * src_px_stride + src_j] +
                             OPT_RANGE_PIXEL_OFFSET;
                     } else {
@@ -219,9 +215,23 @@ static int compute_ansnr(const void *ref, const void *dis, int w, int h,
     return 0;
 }
 
+static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
+{
+    char value[128];
+    snprintf(value, sizeof(value), "%0.2f", d);
+    if (comp) {
+        char key2[128];
+        snprintf(key2, sizeof(key2), "%s%c", key, comp);
+        av_dict_set(metadata, key2, value, 0);
+    } else {
+        av_dict_set(metadata, key, value, 0);
+    }
+}
+
 static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     ANSNRContext *s = ctx->priv;
+    AVDictionary **metadata = &main->metadata;
 
     char *format = s->format;
 
@@ -238,14 +248,12 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     uint8_t sz;
 
-    if (!strcmp(format, "yuv420p") || !strcmp(format, "yuv422p") ||
-        !strcmp(format, "yuv444p")) {
+    if (s->type == 8) {
         peak = 255.0;
         max_psnr = 60.0;
         sz = sizeof(uint8_t);
     }
-    else if (!strcmp(format, "yuv420p10le") || !strcmp(format, "yuv422p10le") ||
-             !strcmp(format, "yuv444p10le")) {
+    else if (s->type == 10) {
         peak = 255.75;
         max_psnr = 72.0;
         sz = sizeof(uint16_t);
@@ -255,7 +263,9 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     compute_ansnr(ref->data[0], main->data[0], w, h, stride, stride, &score,
                   &score_psnr, peak, max_psnr, s);
-
+    
+    set_meta(metadata, "lavfi.ansnr.score", 0, score);
+    
     s->nb_frames++;
 
     s->ansnr_sum += score;
@@ -288,6 +298,7 @@ static int query_formats(AVFilterContext *ctx)
 
 static int config_input_ref(AVFilterLink *inlink)
 {
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     ANSNRContext *s = ctx->priv;
     int buf_stride;
@@ -319,6 +330,8 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(EINVAL);
     }
+    
+    s->type = desc->comp[0].depth > 8 ? 10 : 8;
 
     return 0;
 }
