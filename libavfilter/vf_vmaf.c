@@ -69,17 +69,17 @@ typedef struct VMAFContext {
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption vmaf_options[] = {
-    {"model_path",  "Set the model to be used for computing vmaf.",            OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="/usr/local/share/model/vmaf_v0.6.1.pkl"}, 0, 1, FLAGS},
-    {"log_path",  "Set the file path to be used to store logs.",            OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
-    {"log_fmt",  "Set the format of the log (xml or json).",            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
-    {"disable_clip",  "Disables clip for computing vmaf.",            OFFSET(disable_clip), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"disable avx",  "Disables avx for computing vmaf.",            OFFSET(disable_avx), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"enable_transform",  "Enables transform for computing vmaf.",            OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"phone_model",  "Invokes the phone model that will generate higher VMAF scores.",            OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"psnr",  "Enables computing psnr along with vmaf.",            OFFSET(psnr), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"ssim",  "Enables computing ssim along with vmaf.",            OFFSET(ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"ms_ssim",  "Enables computing ms-ssim along with vmaf.",            OFFSET(ms_ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"pool",  "Set the pool method to be used for computing vmaf.",            OFFSET(pool), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"model_path",  "Set the model to be used for computing vmaf.",                     OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="/usr/local/share/model/vmaf_v0.6.1.pkl"}, 0, 1, FLAGS},
+    {"log_path",  "Set the file path to be used to store logs.",                        OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"log_fmt",  "Set the format of the log (xml or json).",                            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
+    {"disable_clip",  "Disables clip for computing vmaf.",                              OFFSET(disable_clip), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"disable avx",  "Disables avx for computing vmaf.",                                OFFSET(disable_avx), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"enable_transform",  "Enables transform for computing vmaf.",                      OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"phone_model",  "Invokes the phone model that will generate higher VMAF scores.",  OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"psnr",  "Enables computing psnr along with vmaf.",                                OFFSET(psnr), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"ssim",  "Enables computing ssim along with vmaf.",                                OFFSET(ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"ms_ssim",  "Enables computing ms-ssim along with vmaf.",                          OFFSET(ms_ssim), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
+    {"pool",  "Set the pool method to be used for computing vmaf.",                     OFFSET(pool), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     { NULL }
 };
 

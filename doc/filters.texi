@@ -14706,10 +14706,7 @@ vignette='PI/4+random(1)*PI/50':eval=frame
 Obtain the average VMAF (Video Multi-Method Assessment Fusion)
 score between two input videos.
 
-This filter takes in input two input videos, the first input is
-considered the "main" source and is passed unchanged to the
-output. The second input is used as a "reference" video for computing
-the VMAF score.
+This filter takes two input videos.
 
 Both video inputs must have the same resolution and pixel format for
 this filter to work correctly. Also it assumes that both inputs
@@ -14717,9 +14714,48 @@ have the same number of frames, which are compared one by one.
 
 The obtained average VMAF score is printed through the logging system.
 
-Currently it requires Netflix's vmaf library (libvmaf) as a pre-requisite.
-It can be enabled using --enable-libvmaf at ./configure ..
-If no model path is not specified it uses default model.
+Currently it requires Netflix's vmaf library (libvmaf) as a pre-requisite. After installing the library it can be enabled using: @code{./configure --enable-libvmaf}.
+If no model path is specified it uses the default model @code{vmaf_v0.6.1.pkl}.
+
+On the below examples the input file @file{main.mpg} being processed is compared with the reference file @file{ref.mpg}.
+
+The filter has following options:
+
+@table @option
+@item model_path
+Set the model path which is to be used for SVM.
+Default value: @code{"vmaf_v0.6.1.pkl"}
+
+@item log_path
+Set the file path to be used to store logs.
+
+@item log_fmt
+Set the format of the log file (xml or json).
+
+@item disable_clip
+Disables clip for computing vmaf.
+
+@item disable_avx
+Disables avx for computing vmaf.
+
+@item enable_transform
+Enables transform for computing vmaf.
+
+@item phone_model
+Invokes the phone model which will generate VMAF scores higher than in the regular model, which is more suitable for laptop, TV, etc. viewing conditions.
+
+@item psnr
+Enables computing psnr along with vmaf.
+
+@item ssim
+Enables computing ssim along with vmaf.
+
+@item ms_ssim
+Enables computing ms_ssim along with vmaf.
+
+@item pool
+Set the pool method to be used for computing vmaf.
+@end table
 
 For example:
 @example
@@ -14730,9 +14766,6 @@ Example with options:
 @example
 ffmpeg -i main.mpg -i ref.mpg -lavfi vmaf="psnr=1:enable-transform=1" -f null -
 @end example
-
-On this example the input file @file{main.mpg} being processed is compared with the
-reference file @file{ref.mpg}.
 
 @section vstack
 Stack input videos vertically.
