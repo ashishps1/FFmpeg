@@ -13,6 +13,7 @@ OBJS = allfilters.o                                                     \
        avfiltergraph.o                                                  \
        buffersink.o                                                     \
        buffersrc.o                                                      \
+       convolution.o                                                    \
        drawutils.o                                                      \
        fifo.o                                                           \
        formats.o                                                        \
@@ -227,6 +228,7 @@ OBJS-$(CONFIG_MESTIMATE_FILTER)              += vf_mestimate.o motion_estimation
 OBJS-$(CONFIG_METADATA_FILTER)               += f_metadata.o
 OBJS-$(CONFIG_MIDEQUALIZER_FILTER)           += vf_midequalizer.o framesync.o
 OBJS-$(CONFIG_MINTERPOLATE_FILTER)           += vf_minterpolate.o motion_estimation.o
+OBJS-$(CONFIG_MOTION_FILTER)                 += vf_motion.o dualinput.o framesync.o
 OBJS-$(CONFIG_MPDECIMATE_FILTER)             += vf_mpdecimate.o
 OBJS-$(CONFIG_NEGATE_FILTER)                 += vf_lut.o
 OBJS-$(CONFIG_NLMEANS_FILTER)                += vf_nlmeans.o

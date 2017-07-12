@@ -167,7 +167,7 @@ static void compute_vmaf_score(VMAFContext *s)
 static void *call_vmaf(void *ctx)
 {
     VMAFContext *s = (VMAFContext *)ctx;
-    compute_vmaf_score(s);
+    //compute_vmaf_score(s);
     pthread_exit(NULL);
 }
 
