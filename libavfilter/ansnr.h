@@ -22,7 +22,7 @@
 #ifndef AVFILTER_ANSNR_H
 #define AVFILTER_ANSNR_H
 
-static int compute_ansnr(const void *ref, const void *dis, int w,
+static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w,
                          int h, int ref_stride, int dis_stride, double *score,
                          double *score_psnr, double peak, double psnr_max, void *ctx);
 
