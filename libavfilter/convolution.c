@@ -48,10 +48,10 @@ FORCE_INLINE inline float convolution_edge(bool horizontal, const float *filter,
         int j_tap = horizontal ? j - radius + k : j;
 
         if (horizontal) {
-            if (j_tap < 0)
-                j_tap = -j_tap;
-            else if (j_tap >= w)
+            j_tap = FFABS(j_tap);
+            if (j_tap >= w) {
                 j_tap = w - (j_tap - w + 1);
+            }
         } else {
             if (i_tap < 0)
                 i_tap = -i_tap;
