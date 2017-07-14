@@ -26,7 +26,6 @@
 
 #include <inttypes.h>
 #include <pthread.h>
-#include <string.h>
 #include <libvmaf.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
@@ -41,6 +40,7 @@
 typedef struct VMAFContext {
     const AVClass *class;
     FFDualInputContext dinput;
+    const AVPixFmtDescriptor *desc;
     char *format;
     int width;
     int height;
@@ -73,7 +73,6 @@ static const AVOption vmaf_options[] = {
     {"log_path",  "Set the file path to be used to store logs.",                        OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"log_fmt",  "Set the format of the log (xml or json).",                            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"disable_clip",  "Disables clip for computing vmaf.",                              OFFSET(disable_clip), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"disable avx",  "Disables avx for computing vmaf.",                                OFFSET(disable_avx), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     {"enable_transform",  "Enables transform for computing vmaf.",                      OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     {"phone_model",  "Invokes the phone model that will generate higher VMAF scores.",  OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     {"psnr",  "Enables computing psnr along with vmaf.",                                OFFSET(psnr), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
@@ -85,131 +84,76 @@ static const AVOption vmaf_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmaf);
 
-static int read_frame_8bit(float *ref_data, float *main_data, float *temp_data,
-                           int stride, double *score, void *ctx)
-{
-    VMAFContext *s = (VMAFContext *) ctx;
-    int ret;
-
-    pthread_mutex_lock(&s->lock);
-
-    while (!s->frame_set && !s->eof) {
-        pthread_cond_wait(&s->cond, &s->lock);
-    }
-
-    if (s->frame_set) {
-        int ref_stride = s->gref->linesize[0];
-        int main_stride = s->gmain->linesize[0];
-
-        uint8_t *ref_ptr = s->gref->data[0];
-        uint8_t *main_ptr = s->gmain->data[0];
-
-        float *ptr = ref_data;
-
-        int h = s->height;
-        int w = s->width;
-
-        int i,j;
-
-        for (i = 0; i < h; i++) {
-            for ( j = 0; j < w; j++) {
-                ptr[j] = (float)ref_ptr[j];
-            }
-            ref_ptr += ref_stride / sizeof(*ref_ptr);
-            ptr += stride / sizeof(*ptr);
-        }
-
-        ptr = main_data;
-
-        for (i = 0; i < h; i++) {
-            for (j = 0; j < w; j++) {
-                ptr[j] = (float)main_ptr[j];
-            }
-            main_ptr += main_stride / sizeof(*main_ptr);
-            ptr += stride / sizeof(*ptr);
-        }
-    }
-
-    ret = !s->frame_set;
-
-    s->frame_set = 0;
-
-    pthread_cond_signal(&s->cond);
-    pthread_mutex_unlock(&s->lock);
-
-    if (ret) {
-        return 2;
-    }
-
-    return 0;
+#define read_frame_fn(type, bits)                                               \
+static int read_frame_##bits##bit(float *ref_data, float *main_data,            \
+                                      float *temp_data, int stride,             \
+                                      double *score, void *ctx)                 \
+{                                                                               \
+    VMAFContext *s = (VMAFContext *) ctx;                                       \
+    int ret;                                                                    \
+                                                                                \
+    pthread_mutex_lock(&s->lock);                                               \
+                                                                                \
+    while (!s->frame_set && !s->eof) {                                          \
+        pthread_cond_wait(&s->cond, &s->lock);                                  \
+    }                                                                           \
+                                                                                \
+    if (s->frame_set) {                                                         \
+        int ref_stride = s->gref->linesize[0];                                  \
+        int main_stride = s->gmain->linesize[0];                                \
+                                                                                \
+        const type *ref_ptr = (const type *) s->gref->data[0];                  \
+        const type *main_ptr = (const type *) s->gmain->data[0];                \
+                                                                                \
+        float *ptr = ref_data;                                                  \
+                                                                                \
+        int h = s->height;                                                      \
+        int w = s->width;                                                       \
+                                                                                \
+        int i,j;                                                                \
+                                                                                \
+        for (i = 0; i < h; i++) {                                               \
+            for ( j = 0; j < w; j++) {                                          \
+                ptr[j] = (float)ref_ptr[j];                                     \
+            }                                                                   \
+            ref_ptr += ref_stride / sizeof(*ref_ptr);                           \
+            ptr += stride / sizeof(*ptr);                                       \
+        }                                                                       \
+                                                                                \
+        ptr = main_data;                                                        \
+                                                                                \
+        for (i = 0; i < h; i++) {                                               \
+            for (j = 0; j < w; j++) {                                           \
+                ptr[j] = (float)main_ptr[j];                                    \
+            }                                                                   \
+            main_ptr += main_stride / sizeof(*main_ptr);                        \
+            ptr += stride / sizeof(*ptr);                                       \
+        }                                                                       \
+    }                                                                           \
+                                                                                \
+    ret = !s->frame_set;                                                        \
+                                                                                \
+    s->frame_set = 0;                                                           \
+                                                                                \
+    pthread_cond_signal(&s->cond);                                              \
+    pthread_mutex_unlock(&s->lock);                                             \
+                                                                                \
+    if (ret) {                                                                  \
+        return 2;                                                               \
+    }                                                                           \
+                                                                                \
+    return 0;                                                                   \
 }
 
-static int read_frame_10bit(float *ref_data, float *main_data, float *temp_data,
-                            int stride, double *score, void *ctx)
-{
-    VMAFContext *s = (VMAFContext *) ctx;
-    int ret;
-
-    pthread_mutex_lock(&s->lock);
-
-    while (!s->frame_set && !s->eof) {
-        pthread_cond_wait(&s->cond, &s->lock);
-    }
-
-    if (s->frame_set) {
-        int ref_stride = s->gref->linesize[0];
-        int main_stride = s->gmain->linesize[0];
-
-        uint16_t *ref_ptr = (uint16_t *) s->gref->data[0];
-        uint16_t *main_ptr = (uint16_t *) s->gmain->data[0];
-
-        float *ptr = ref_data;
-
-        int h = s->height;
-        int w = s->width;
-
-        int i,j;
-
-        for (i = 0; i < h; i++) {
-            for ( j = 0; j < w; j++) {
-                ptr[j] = (float)ref_ptr[j];
-            }
-            ref_ptr += ref_stride / sizeof(*ref_ptr);
-            ptr += stride / sizeof(*ptr);
-        }
-
-        ptr = main_data;
-
-        for (i = 0; i < h; i++) {
-            for (j = 0; j < w; j++) {
-                ptr[j] = (float)main_ptr[j];
-            }
-            main_ptr += main_stride / sizeof(*main_ptr);
-            ptr += stride / sizeof(*ptr);
-        }
-    }
-
-    ret = !s->frame_set;
-
-    s->frame_set = 0;
-
-    pthread_cond_signal(&s->cond);
-    pthread_mutex_unlock(&s->lock);
-
-    if (ret) {
-        return 2;
-    }
-
-    return 0;
-}
+read_frame_fn(uint8_t, 8);
+read_frame_fn(uint16_t, 10);
 
 static void compute_vmaf_score(VMAFContext *s)
 {
     int (*read_frame)(float *ref_data, float *main_data, float *temp_data,
                       int stride, double *score, void *ctx);
 
-    if (!strcmp(s->format, "yuv420p") || !strcmp(s->format, "yuv422p") ||
-        !strcmp(s->format, "yuv444p")) {
+    if (s->desc->comp[0].depth <= 8) {
         read_frame = read_frame_8bit;
     } else {
         read_frame = read_frame_10bit;
@@ -217,15 +161,16 @@ static void compute_vmaf_score(VMAFContext *s)
 
     s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame, s,
                                  s->model_path, s->log_path, s->log_fmt,
-                                 s->disable_clip, s->disable_avx,
-                                 s->enable_transform, s->phone_model,
-                                 s->psnr, s->ssim, s->ms_ssim, s->pool);
+                                 s->disable_clip, 0, s->enable_transform,
+                                 s->phone_model, s->psnr, s->ssim, s->ms_ssim,
+                                 s->pool);
 }
 
 static void *call_vmaf(void *ctx)
 {
     VMAFContext *s = (VMAFContext *) ctx;
     compute_vmaf_score(s);
+    av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
     pthread_exit(NULL);
 }
 
@@ -294,12 +239,8 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "Inputs must be of same pixel format.\n");
         return AVERROR(EINVAL);
     }
-    if (!(s->model_path)) {
-        av_log(ctx, AV_LOG_ERROR, "No model specified.\n");
-        return AVERROR(EINVAL);
-    }
 
-    s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
+    s->desc = av_pix_fmt_desc_get(inlink->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
@@ -361,8 +302,6 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     pthread_mutex_destroy(&s->lock);
     pthread_cond_destroy(&s->cond);
-
-    av_log(ctx, AV_LOG_INFO, "VMAF score: %f\n",s->vmaf_score);
 }
 
 static const AVFilterPad vmaf_inputs[] = {
