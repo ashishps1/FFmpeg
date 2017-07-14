@@ -214,19 +214,19 @@ static int config_input_ref(AVFilterLink *inlink)
 
     if (!(s->ref_data = av_malloc(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "ref_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
     if (!(s->prev_blur_data = av_mallocz(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "prev_blur_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
     if (!(s->blur_data = av_mallocz(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "blur_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
     if (!(s->temp_data = av_mallocz(data_sz * 2))) {
         av_log(ctx, AV_LOG_ERROR, "temp_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
 
     s->type = desc->comp[0].depth > 8 ? 10 : 8;
