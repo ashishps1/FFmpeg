@@ -19,11 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdbool.h>
+#include "libavutil/opt.h"
 #include "convolution.h"
-
-#define FORCE_INLINE __attribute__((always_inline))
-#define RESTRICT __restrict
 
 static inline int floorn(int n, int m)
 {
@@ -35,7 +32,7 @@ static inline int ceiln(int n, int m)
     return n % m ? n + (m - n % m) : n;
 }
 
-FORCE_INLINE inline float convolution_edge(bool horizontal, const float *filter,
+av_always_inline float convolution_edge(int horizontal, const float *filter,
                                            int filt_width, const float *src,
                                            int w, int h, int stride, int i,
                                            int j)
@@ -53,9 +50,8 @@ FORCE_INLINE inline float convolution_edge(bool horizontal, const float *filter,
                 j_tap = w - (j_tap - w + 1);
             }
         } else {
-            if (i_tap < 0)
-                i_tap = -i_tap;
-            else if (i_tap >= h)
+            i_tap = FFABS(i_tap);
+            if (i_tap >= h)
                 i_tap = h - (i_tap - h + 1);
         }
 
@@ -74,7 +70,7 @@ static void convolution_x_c(const float *filter, int filt_width,
 
     for (int i = 0; i < h; i++) {
         for (int j = 0; j < borders_left; j += step) {
-            dst[i * dst_stride + j / step] = convolution_edge(true, filter,
+            dst[i * dst_stride + j / step] = convolution_edge(1, filter,
                                                               filt_width, src,
                                                               w, h, src_stride,
                                                               i, j);
@@ -89,7 +85,7 @@ static void convolution_x_c(const float *filter, int filt_width,
         }
 
         for (int j = borders_right; j < w; j += step) {
-            dst[i * dst_stride + j / step] = convolution_edge(true, filter,
+            dst[i * dst_stride + j / step] = convolution_edge(1, filter,
                                                               filt_width, src,
                                                               w, h, src_stride,
                                                               i, j);
@@ -107,7 +103,7 @@ static void convolution_y_c(const float *filter, int filt_width,
 
     for (int i = 0; i < borders_top; i += step) {
         for (int j = 0; j < w; j++) {
-            dst[(i / step) * dst_stride + j] = convolution_edge(false, filter,
+            dst[(i / step) * dst_stride + j] = convolution_edge(0, filter,
                                                                 filt_width, src,
                                                                 w, h, src_stride,
                                                                 i, j);
@@ -124,7 +120,7 @@ static void convolution_y_c(const float *filter, int filt_width,
     }
     for (int i = borders_bottom; i < h; i += step) {
         for (int j = 0; j < w; j++) {
-            dst[(i / step) * dst_stride + j] = convolution_edge(false, filter,
+            dst[(i / step) * dst_stride + j] = convolution_edge(0, filter,
                                                                 filt_width, src,
                                                                 w, h, src_stride,
                                                                 i, j);

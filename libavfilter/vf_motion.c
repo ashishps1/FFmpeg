@@ -51,7 +51,6 @@ typedef struct MOTIONContext {
     uint64_t nb_frames;
 } MOTIONContext;
 
-#define OFFSET(x) offsetof(MOTIONContext, x)
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
