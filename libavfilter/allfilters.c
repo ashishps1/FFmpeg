@@ -224,6 +224,7 @@ static void register_all(void)
     REGISTER_FILTER(INTERLEAVE,     interleave,     vf);
     REGISTER_FILTER(KERNDEINT,      kerndeint,      vf);
     REGISTER_FILTER(LENSCORRECTION, lenscorrection, vf);
+    REGISTER_FILTER(LIBVMAF,        libvmaf,        vf);
     REGISTER_FILTER(LOOP,           loop,           vf);
     REGISTER_FILTER(LUMAKEY,        lumakey,        vf);
     REGISTER_FILTER(LUT,            lut,            vf);
@@ -325,7 +326,6 @@ static void register_all(void)
     REGISTER_FILTER(VIDSTABDETECT,  vidstabdetect,  vf);
     REGISTER_FILTER(VIDSTABTRANSFORM, vidstabtransform, vf);
     REGISTER_FILTER(VIGNETTE,       vignette,       vf);
-    REGISTER_FILTER(VMAF,           vmaf,           vf);
     REGISTER_FILTER(VSTACK,         vstack,         vf);
     REGISTER_FILTER(W3FDIF,         w3fdif,         vf);
     REGISTER_FILTER(WAVEFORM,       waveform,       vf);
