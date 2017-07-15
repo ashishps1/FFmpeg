@@ -39,6 +39,7 @@
 typedef struct ANSNRContext {
     const AVClass *class;
     FFDualInputContext dinput;
+    const AVPixFmtDescriptor *desc;
     int width;
     int height;
     uint8_t type;
@@ -199,9 +200,9 @@ static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w, int h,
 
     buf_stride = buf_stride / sizeof(float);
 
-    ansnr_filter2d(ansnr_filter2d_ref, (const uint8_t *)ref, ref_filt, w, h,
+    ansnr_filter2d(ansnr_filter2d_ref, (const uint8_t *) ref, ref_filt, w, h,
                    ref_stride, buf_stride, ansnr_filter2d_ref_width, s);
-    ansnr_filter2d(ansnr_filter2d_dis, (const uint8_t *)dis, dis_filt, w, h,
+    ansnr_filter2d(ansnr_filter2d_dis, (const uint8_t *) dis, dis_filt, w, h,
                    dis_stride, buf_stride, ansnr_filter2d_dis_width, s);
 
     ansnr_mse(ref_filt, dis_filt, &signal, &noise, w, h, buf_stride,
@@ -290,9 +291,9 @@ static int query_formats(AVFilterContext *ctx)
 
 static int config_input_ref(AVFilterLink *inlink)
 {
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     ANSNRContext *s = ctx->priv;
+    s->desc = av_pix_fmt_desc_get(inlink->format);
     int buf_stride;
     size_t buf_sz;
 
@@ -319,7 +320,7 @@ static int config_input_ref(AVFilterLink *inlink)
 
     if (!(s->data_buf = av_malloc(buf_sz * 3))) {
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
 
     s->type = desc->comp[0].depth > 8 ? 10 : 8;
