@@ -14714,10 +14714,13 @@ have the same number of frames, which are compared one by one.
 
 The obtained average VMAF score is printed through the logging system.
 
-Currently it requires Netflix's vmaf library (libvmaf) as a pre-requisite. After installing the library it can be enabled using: @code{./configure --enable-libvmaf}.
-If no model path is specified it uses the default model @code{vmaf_v0.6.1.pkl}.
+Currently it requires Netflix's vmaf library (libvmaf) as a pre-requisite.
+After installing the library it can be enabled using:
+@code{./configure --enable-libvmaf}.
+If no model path is specified it uses the default model: @code{vmaf_v0.6.1.pkl}.
 
-On the below examples the input file @file{main.mpg} being processed is compared with the reference file @file{ref.mpg}.
+On the below examples the input file @file{main.mpg} being processed is
+compared with the reference file @file{ref.mpg}.
 
 The filter has following options:
 
@@ -14732,17 +14735,12 @@ Set the file path to be used to store logs.
 @item log_fmt
 Set the format of the log file (xml or json).
 
-@item disable_clip
-Disables clip for computing vmaf.
-
-@item disable_avx
-Disables avx for computing vmaf.
-
 @item enable_transform
 Enables transform for computing vmaf.
 
 @item phone_model
-Invokes the phone model which will generate VMAF scores higher than in the regular model, which is more suitable for laptop, TV, etc. viewing conditions.
+Invokes the phone model which will generate VMAF scores higher than in the
+regular model, which is more suitable for laptop, TV, etc. viewing conditions.
 
 @item psnr
 Enables computing psnr along with vmaf.

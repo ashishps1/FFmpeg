@@ -161,9 +161,8 @@ static void compute_vmaf_score(VMAFContext *s)
 
     s->vmaf_score = compute_vmaf(s->format, s->width, s->height, read_frame, s,
                                  s->model_path, s->log_path, s->log_fmt,
-                                 s->disable_clip, 0, s->enable_transform,
-                                 s->phone_model, s->psnr, s->ssim, s->ms_ssim,
-                                 s->pool);
+                                 0, 0, s->enable_transform, s->phone_model,
+                                 s->psnr, s->ssim, s->ms_ssim, s->pool);
 }
 
 static void *call_vmaf(void *ctx)
