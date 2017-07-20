@@ -24,7 +24,6 @@
  * Calculate the ADM between two input videos.
  */
 
-#include <inttypes.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -40,9 +39,9 @@
 typedef struct ADMContext {
     const AVClass *class;
     FFDualInputContext dinput;
+    const AVPixFmtDescriptor *desc;
     int width;
     int height;
-    char *format;
     float *ref_data;
     float *main_data;
     float *data_buf;
@@ -58,24 +57,10 @@ static const AVOption adm_options[] = {
 
 AVFILTER_DEFINE_CLASS(adm);
 
-#define OFFSET(x) offsetof(ADMContext, x)
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
-#define ADM_BORDER_FACTOR (0.1)
-#define VIEW_DIST 3.0f
-#define REF_DISPLAY_HEIGHT 1080
-
-typedef struct adm_dwt_band_t {
-    float *band_a;
-    float *band_v;
-    float *band_h;
-    float *band_d;
-} adm_dwt_band_t;
-
-static const float dwt2_db2_coeffs_lo[4] = { 0.482962913144690, 0.836516303737469, 0.224143868041857, -0.129409522550921 };
-static const float dwt2_db2_coeffs_hi[4] = { -0.129409522550921, -0.224143868041857, 0.836516303737469, -0.482962913144690 };
 
 static float rcp(float x)
 {
@@ -85,35 +70,8 @@ static float rcp(float x)
 
 #define DIVS(n, d) ((n) * rcp(d))
 
-struct dwt_model_params {
-    float a;
-    float k;
-    float f0;
-    float g[4];
-};
-
-static const struct dwt_model_params dwt_7_9_YCbCr_threshold[3] = {
-    { .a = 0.495, .k = 0.466, .f0 = 0.401, .g = { 1.501, 1.0, 0.534, 1.0} },
-    { .a = 1.633, .k = 0.353, .f0 = 0.209, .g = { 1.520, 1.0, 0.502, 1.0} },
-    { .a = 0.944, .k = 0.521, .f0 = 0.404, .g = { 1.868, 1.0, 0.516, 1.0} }
-};
-
-static const float dwt_7_9_basis_function_amplitudes[6][4] = {
-    { 0.62171,  0.67234,  0.72709,  0.67234  },
-    { 0.34537,  0.41317,  0.49428,  0.41317  },
-    { 0.18004,  0.22727,  0.28688,  0.22727  },
-    { 0.091401, 0.11792,  0.15214,  0.11792  },
-    { 0.045943, 0.059758, 0.077727, 0.059758 },
-    { 0.023013, 0.030018, 0.039156, 0.030018 }
-};
-
-static inline double get_adm_avg(double adm_sum, uint64_t nb_frames)
-{
-    return adm_sum / nb_frames;
-}
-
-static inline float dwt_quant_step(const struct dwt_model_params *params,
-                                   int lambda, int theta)
+av_always_inline static float dwt_quant_step(const struct dwt_model_params *params,
+                                             int lambda, int theta)
 {
     float r = VIEW_DIST * REF_DISPLAY_HEIGHT * M_PI / 180.0;
 
@@ -354,7 +312,7 @@ static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
     int i, j, filt_i, filt_j, src_i, src_j;
 
     for (i = 0; i < (h + 1) / 2; i++) {
-        /* Vertical pass. */
+        /** Vertical pass. */
         for (j = 0; j < w; j++) {
             float accum_lo = 0;
             float accum_hi = 0;
@@ -380,7 +338,7 @@ static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
             s->temp_hi[j] = accum_hi;
         }
 
-        /* Horizontal pass (lo). */
+        /** Horizontal pass (lo). */
         for (j = 0; j < (w + 1) / 2; j++) {
             float accum_lo = 0;
             float accum_hi = 0;
@@ -406,7 +364,7 @@ static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
             dst->band_v[i * dst_px_stride + j] = accum_hi;
         }
 
-        /* Horizontal pass (hi). */
+        /** Horizontal pass (hi). */
         for (j = 0; j < (w + 1) / 2; j++) {
             float accum_lo = 0;
             float accum_hi = 0;
@@ -586,6 +544,37 @@ int compute_adm(const float *ref, const float *dis, int w, int h,
     return ret;
 }
 
+#define offset_fn(type, bits) \
+    static void offset_##bits##bit(ADMContext *s, const AVFrame *ref, AVFrame *main, int stride) \
+{ \
+    int w = s->width; \
+    int h = s->height; \
+    int i,j; \
+    \
+    int ref_stride = ref->linesize[0]; \
+    int main_stride = main->linesize[0]; \
+    \
+    const type *ref_ptr = (const type *) ref->data[0]; \
+    const type *main_ptr = (const type *) main->data[0]; \
+    \
+    float *ref_ptr_data = s->ref_data; \
+    float *main_ptr_data = s->main_data; \
+    \
+    for(i = 0; i < h; i++) { \
+        for(j = 0; j < w; j++) { \
+            ref_ptr_data[j] = (float) ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
+            main_ptr_data[j] = (float) main_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
+        } \
+        ref_ptr += ref_stride / sizeof(type); \
+        ref_ptr_data += stride / sizeof(float); \
+        main_ptr += main_stride / sizeof(type); \
+        main_ptr_data += stride / sizeof(float); \
+    } \
+}
+
+offset_fn(uint8_t, 8);
+offset_fn(uint16_t, 10);
+
 static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
 {
     char value[128];
@@ -603,56 +592,31 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
     ADMContext *s = ctx->priv;
     AVDictionary **metadata = &main->metadata;
-    
+
     double score = 0.0;
     double score_num = 0;
     double score_den = 0;
     double scores[2*4];
-
-    int i,j;
 
     int w = s->width;
     int h = s->height;
 
     int stride;
 
-    int ref_stride;
-    int main_stride;
-
-    float *ref_data_ptr;
-    float *main_data_ptr;
-
-    uint8_t *ref_ptr;
-    uint8_t *main_ptr;
-
     stride = ALIGN_CEIL(w * sizeof(float));
 
-    ref_ptr = ref->data[0];
-    main_ptr = main->data[0];
-
-    ref_stride = ref->linesize[0];
-    main_stride = main->linesize[0];
-
-    ref_data_ptr = s->ref_data;
-    main_data_ptr = s->main_data;
-
-    for(i=0;i<h;i++){
-        for(j=0;j<w;j++){
-            ref_data_ptr[j] = (float)ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
-            main_data_ptr[j] = (float)main_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
-        }
-        ref_data_ptr += stride / sizeof(float);
-        main_data_ptr += stride / sizeof(float);
-        ref_ptr += ref_stride / sizeof(uint8_t);
-        main_ptr += main_stride / sizeof(uint8_t);
+    // Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET
+    if (s->desc->comp[0].depth <= 8) {
+        offset_8bit(s, ref, main, stride);
+    } else {
+        offset_10bit(s, ref, main, stride);
     }
 
-
     compute_adm(s->ref_data, s->main_data, w, h, stride, stride, &score,
-                &score_num, &score_den, &scores, ADM_BORDER_FACTOR, s);
+                &score_num, &score_den, scores, ADM_BORDER_FACTOR, s);
 
     set_meta(metadata, "lavfi.adm.score", 0, score);
-    
+
     s->nb_frames++;
 
     s->adm_sum += score;
@@ -691,7 +655,6 @@ static int config_input_ref(AVFilterLink *inlink)
     size_t buf_sz;
     int stride;
     size_t data_sz;
-    size_t temp_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -703,21 +666,21 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
+    s->desc = av_pix_fmt_desc_get(inlink->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
-    s->format = av_get_pix_fmt_name(ctx->inputs[0]->format);
 
     stride = ALIGN_CEIL(s->width * sizeof(float));
     data_sz = (size_t)stride * s->height;
-    
+
     if (!(s->ref_data = av_malloc(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "ref data allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
-    
+
     if (!(s->main_data = av_malloc(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "main data allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
 
     buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(float));
@@ -730,21 +693,19 @@ static int config_input_ref(AVFilterLink *inlink)
 
     if (!(s->data_buf = av_malloc(buf_sz * 35))) {
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
-    
-    temp_sz = ALIGN_CEIL(sizeof(float) * s->width);
 
-    if (!(s->temp_lo = av_malloc(temp_sz))) {
+    if (!(s->temp_lo = av_malloc(stride))) {
         av_log(ctx, AV_LOG_ERROR, "temp lo allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
 
-    if (!(s->temp_hi = av_malloc(temp_sz))) {
+    if (!(s->temp_hi = av_malloc(stride))) {
         av_log(ctx, AV_LOG_ERROR, "temp hi allocation failed.\n");
-        return AVERROR(EINVAL);
+        return AVERROR(ENOMEM);
     }
-   
+
     return 0;
 }
 
@@ -783,7 +744,9 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
 
-    ff_dualinput_uninit(&s->dinput);
+    if (s->nb_frames > 0) {
+        av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", s->adm_sum / s->nb_frames);
+    }
 
     av_free(s->ref_data);
     av_free(s->main_data);
@@ -791,8 +754,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_free(s->temp_lo);
     av_free(s->temp_hi);
 
-    av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", get_adm_avg(s->adm_sum,
-                                                            s->nb_frames));
+    ff_dualinput_uninit(&s->dinput);
 }
 
 static const AVFilterPad adm_inputs[] = {
