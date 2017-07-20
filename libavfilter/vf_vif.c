@@ -39,11 +39,14 @@
 typedef struct VIFContext {
     const AVClass *class;
     FFDualInputContext dinput;
+    const AVPixFmtDescriptor *desc;
     int width;
     int height;
     uint8_t type;
     float *data_buf;
     float *temp;
+    float *ref_data;
+    float *main_data;
     double vif_sum;
     uint64_t nb_frames;
 } VIFContext;
@@ -67,15 +70,42 @@ const float vif_filter1d_table[4][17] = {
     { 0x1.54be4p-3,  0x1.55a0ep-1,  0x1.54be4p-3 }
 };
 
-static void vif_dec2(const float *src, float *dst, int src_w, int src_h,
-              int src_stride, int dst_stride)
+static void offset(VIFContext *s, const AVFrame *ref, AVFrame *main, int stride)
 {
-    int src_px_stride = src_stride / sizeof(float); // src_stride is in bytes
+    int w = s->width;
+    int h = s->height;
+    int i,j;
+
+    int ref_stride = ref->linesize[0];
+    int main_stride = main->linesize[0];
+
+    uint8_t *ref_ptr = ref->data[0];
+    uint8_t *main_ptr = main->data[0];
+
+    float *ref_ptr_data = s->ref_data;
+    float *main_ptr_data = s->main_data;
+
+    for(i = 0; i < h; i++) {
+        for(j = 0; j < w; j++) {
+            ref_ptr_data[j] = (float) ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
+            main_ptr_data[j] = (float) main_ptr[j] + OPT_RANGE_PIXEL_OFFSET;
+        }
+        ref_ptr += ref_stride / sizeof(uint8_t);
+        ref_ptr_data += stride / sizeof(float);
+        main_ptr += main_stride / sizeof(uint8_t);
+        main_ptr_data += stride / sizeof(float);
+    }
+}
+
+static void vif_dec2(const float *src, float *dst, int src_w, int src_h,
+                     int src_stride, int dst_stride)
+{
+    int src_px_stride = src_stride / sizeof(float);
     int dst_px_stride = dst_stride / sizeof(float);
 
     int i, j;
 
-    // decimation by 2 in each direction (after gaussian blur? check)
+    // decimation by 2 in each direction (after gaussian blur check)
     for (i = 0; i < src_h / 2; i++) {
         for (j = 0; j < src_w / 2; j++) {
             dst[i * dst_px_stride + j] = src[(i * 2) * src_px_stride + (j * 2)];
@@ -95,7 +125,7 @@ static float vif_sum(const float *x, int w, int h, int stride)
 
         for (j = 0; j < w; j++) {
             accum_inner += x[i * px_stride + j];
-        } // having an inner accumulator help reduce numerical error (no accumulation of near-0 terms)
+        }
 
         accum += accum_inner;
     }
@@ -167,8 +197,8 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
 }
 
 static void vif_xx_yy_xy(const float *x, const float *y, float *xx, float *yy,
-                  float *xy, int w, int h, int xstride, int ystride,
-                  int xxstride, int yystride, int xystride)
+                         float *xy, int w, int h, int xstride, int ystride,
+                         int xxstride, int yystride, int xystride)
 {
     int x_px_stride = xstride / sizeof(float);
     int y_px_stride = ystride / sizeof(float);
@@ -177,11 +207,6 @@ static void vif_xx_yy_xy(const float *x, const float *y, float *xx, float *yy,
     int xy_px_stride = xystride / sizeof(float);
 
     int i, j;
-
-    // L1 is 32 - 64 KB
-    // L2 is 2-4 MB
-    // w, h = 1920 x 1080 at floating point is 8 MB
-    // not going to fit into L2
 
     float xval, yval, xxval, yyval, xyval;
 
@@ -201,13 +226,14 @@ static void vif_xx_yy_xy(const float *x, const float *y, float *xx, float *yy,
     }
 }
 
-static void vif_filter1d(const float *f, const float *src, float *dst, float *tmpbuf,
-                  int w, int h, int src_stride, int dst_stride, int fwidth, VIFContext *s)
+static void vif_filter1d(const float *f, const float *src, float *dst,
+                         float *tmpbuf, int w, int h, int src_stride,
+                         int dst_stride, int fwidth, VIFContext *s)
 {
 
     int src_px_stride = src_stride / sizeof(float);
     int dst_px_stride = dst_stride / sizeof(float);
-    
+
     float fcoeff, imgcoeff;
 
     int i, j, fi, fj, ii, jj;
@@ -252,13 +278,12 @@ static void vif_filter1d(const float *f, const float *src, float *dst, float *tm
 }
 
 int compute_vif(const float *ref, const float *dis, int w, int h,
-                       int ref_stride, int dis_stride, double *score,
-                       double *score_num, double *score_den, double *scores,
-                       void *ctx)
+                int ref_stride, int dis_stride, double *score,
+                double *score_num, double *score_den, double *scores,
+                void *ctx)
 {
     VIFContext *s = (VIFContext *) ctx;
 
-    float *data_buf = 0;
     char *data_top;
 
     float *ref_scale;
@@ -278,9 +303,6 @@ int compute_vif(const float *ref, const float *dis, int w, int h,
     float *num_array;
     float *den_array;
     float *tmpbuf;
-
-    float *mu1_adj = 0;
-    float *mu2_adj = 0;
 
     const float *curr_ref_scale = ref;
     const float *curr_dis_scale = dis;
@@ -438,19 +460,12 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     double stride;
 
-    uint8_t sz;
+    stride = ALIGN_CEIL(w * sizeof(float));
 
-    if (s->type == 8) {
-        sz = sizeof(uint8_t);
-    }
-    else if (s->type == 10) {
-        sz = sizeof(uint16_t);
-    }
+    offset(s, ref, main, stride);
 
-    stride = ALIGN_CEIL(w * sz);
-
-    compute_vif((const uint8_t *) ref->data[0], (const uint8_t *) main->data[0],
-                w, h, stride, stride, &score, &score_num, &score_den, scores, s);
+    compute_vif(s->ref_data, s->main_data, w, h, stride, stride, &score,
+                &score_num, &score_den, scores, s);
 
     set_meta(metadata, "lavfi.vif.score", score);
 
@@ -486,11 +501,10 @@ static int query_formats(AVFilterContext *ctx)
 
 static int config_input_ref(AVFilterLink *inlink)
 {
-    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
     AVFilterContext *ctx  = inlink->dst;
     VIFContext *s = ctx->priv;
-    int buf_stride;
-    size_t buf_sz;
+    int stride;
+    size_t data_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -502,28 +516,39 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
+    s->desc = av_pix_fmt_desc_get(inlink->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    buf_stride = ALIGN_CEIL(s->width * sizeof(float));
-    buf_sz = (size_t)buf_stride * s->height;
+    stride = ALIGN_CEIL(s->width * sizeof(float));
+    data_sz = (size_t)stride * s->height;
 
-    if (SIZE_MAX / buf_sz < 15)
+    if (SIZE_MAX / data_sz < 15)
     {
-        av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz < 15, buf_sz = %lu.\n", buf_sz);
+        av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz < 15\n", data_sz);
+        return AVERROR(EINVAL);
     }
 
-    if (!(s->data_buf = av_malloc(buf_sz * 16)))
+    if (!(s->data_buf = av_malloc(data_sz * 16)))
     {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for data_buf.\n");
+        return AVERROR(ENOMEM);
     }
-
+    if (!(s->ref_data = av_malloc(data_sz)))
+    {
+        av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for ref_data.\n");
+        return AVERROR(ENOMEM);
+    }
+    if (!(s->main_data = av_malloc(data_sz)))
+    {
+        av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for main_data.\n");
+        return AVERROR(ENOMEM);
+    }
     if (!(s->temp = av_malloc(s->width * sizeof(float))))
     {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for temp.\n");
+        return AVERROR(ENOMEM);
     }
-
-    s->type = desc->comp[0].depth > 8 ? 10 : 8;
 
     return 0;
 }
@@ -566,6 +591,8 @@ static av_cold void uninit(AVFilterContext *ctx)
     ff_dualinput_uninit(&s->dinput);
 
     av_free(s->data_buf);
+    av_free(s->ref_data);
+    av_free(s->main_data);
     av_free(s->temp);
 
     av_log(ctx, AV_LOG_INFO, "VIF AVG: %.3f\n", s->vif_sum / s->nb_frames);
