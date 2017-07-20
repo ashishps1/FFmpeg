@@ -24,7 +24,6 @@
  * Calculate Anti-Noise Singnal to Noise Ratio (ANSNR) between two input videos.
  */
 
-#include <inttypes.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -42,26 +41,24 @@ typedef struct ANSNRContext {
     const AVPixFmtDescriptor *desc;
     int width;
     int height;
-    uint8_t type;
     float *data_buf;
     double ansnr_sum;
     uint64_t nb_frames;
 } ANSNRContext;
 
-#define OFFSET(x) offsetof(ANSNRContext, x)
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 
 const int ansnr_filter2d_ref_width = 3;
-const int ansnr_filter2d_dis_width = 5;
+const int ansnr_filter2d_main_width = 5;
 
 const float ansnr_filter2d_ref[3 * 3] = {
     1.0 / 16.0, 2.0 / 16.0, 1.0 / 16.0,
     2.0 / 16.0, 4.0 / 16.0, 2.0 / 16.0,
     1.0 / 16.0, 2.0 / 16.0, 1.0 / 16.0
 };
-const float ansnr_filter2d_dis[5 * 5] = {
+const float ansnr_filter2d_main[5 * 5] = {
     2.0 / 571.0,  7.0 / 571.0,  12.0 / 571.0,  7.0 / 571.0,  2.0 / 571.0,
     7.0 / 571.0, 31.0 / 571.0,  52.0 / 571.0, 31.0 / 571.0,  7.0 / 571.0,
     12.0 / 571.0, 52.0 / 571.0, 127.0 / 571.0, 52.0 / 571.0, 12.0 / 571.0,
@@ -75,23 +72,18 @@ static const AVOption ansnr_options[] = {
 
 AVFILTER_DEFINE_CLASS(ansnr);
 
-static inline double get_ansnr_avg(double ansnr_sum, uint64_t nb_frames)
-{
-    return ansnr_sum / nb_frames;
-}
-
 static inline float pow_2(float base)
 {
     return base*base;
 }
 
-static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
-                      int w, int h, int ref_stride, int dis_stride)
+static void ansnr_mse(float *ref, float *main, float *signal, float *noise,
+                      int w, int h, int ref_stride, int main_stride)
 {
     int i, j;
 
     int ref_ind;
-    int dis_ind;
+    int main_ind;
 
     float signal_sum = 0;
     float noise_sum = 0;
@@ -99,10 +91,10 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
     for (i = 0; i < h; i++) {
         for (j = 0; j < w; j++) {
             ref_ind = i * ref_stride + j;
-            dis_ind = i * dis_stride + j;
+            main_ind = i * main_stride + j;
 
             signal_sum += pow_2(ref[ref_ind]);
-            noise_sum += pow_2(ref[ref_ind] - dis[dis_ind]);
+            noise_sum += pow_2(ref[ref_ind] - main[main_ind]);
         }
     }
 
@@ -114,75 +106,71 @@ static void ansnr_mse(float *ref, float *dis, float *signal, float *noise,
     }
 }
 
-static void ansnr_filter2d(const float *filt, const uint8_t *src, float *dst,
-                           int w, int h, int src_stride, int dst_stride,
-                           int filt_width, ANSNRContext *s)
-{
-    uint8_t sz;
-
-    const uint8_t *src_8bit = (const uint8_t *) src;
-    const uint16_t *src_10bit = (const uint16_t *) src;
-
-    int src_px_stride;
-
-    float filt_coeff, img_coeff;
-    int i, j, filt_i, filt_j, src_i, src_j;
-
-    if (s->type == 8) {
-        sz = sizeof(uint8_t);
-    }
-    else if (s->type == 10) {
-        sz = sizeof(uint16_t);
-    }
-
-    src_px_stride = src_stride / sizeof(sz);
-
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
-            float accum = 0;
-            for (filt_i = 0; filt_i < filt_width; filt_i++) {
-                for (filt_j = 0; filt_j < filt_width; filt_j++) {
-                    filt_coeff = filt[filt_i * filt_width + filt_j];
-
-                    src_i = i - filt_width / 2 + filt_i;
-                    src_j = j - filt_width / 2 + filt_j;
-
-                    src_i = FFABS(src_i);
-                    if (src_i >= h) {
-                        src_i = 2 * h - src_i - 1;
-                    }
-                    src_j = FFABS(src_j);
-                    if (src_j >= w) {
-                        src_j = 2 * w - src_j - 1;
-                    }
-
-                    if (s->type == 8) {
-                        img_coeff = src_8bit[src_i * src_px_stride + src_j] +
-                            OPT_RANGE_PIXEL_OFFSET;
-                    } else {
-                        img_coeff = src_10bit[src_i * src_px_stride + src_j] +
-                            OPT_RANGE_PIXEL_OFFSET;
-                    }
-
-                    accum += filt_coeff * img_coeff;
-                }
-            }
-            dst[i * dst_stride + j] = accum;
-        }
-    }
+#define ansnr_filter2d_fn(type, bits) \
+    static void ansnr_filter2d_##bits##bit(const float *filt, const uint8_t *source, float *dst, \
+                                           int w, int h, int src_stride, int dst_stride, \
+                                           int filt_width, ANSNRContext *s) \
+{ \
+    uint8_t sz; \
+    \
+    const type *src = (const type *) source; \
+    \
+    int src_px_stride; \
+    \
+    float filt_coeff, img_coeff; \
+    int i, j, filt_i, filt_j, src_i, src_j; \
+    \
+    if (bits == 8) { \
+        sz = sizeof(uint8_t); \
+    } else { \
+        sz = sizeof(uint16_t); \
+    } \
+    \
+    src_px_stride = src_stride / sz; \
+    \
+    for (i = 0; i < h; i++) { \
+        for (j = 0; j < w; j++) { \
+            float accum = 0; \
+            for (filt_i = 0; filt_i < filt_width; filt_i++) { \
+                for (filt_j = 0; filt_j < filt_width; filt_j++) { \
+                    filt_coeff = filt[filt_i * filt_width + filt_j]; \
+                    \
+                    src_i = i - filt_width / 2 + filt_i; \
+                    src_j = j - filt_width / 2 + filt_j; \
+                    \
+                    src_i = FFABS(src_i); \
+                    if (src_i >= h) { \
+                        src_i = 2 * h - src_i - 1; \
+                    } \
+                    src_j = FFABS(src_j); \
+                    if (src_j >= w) { \
+                        src_j = 2 * w - src_j - 1; \
+                    } \
+                    \
+                    img_coeff = src[src_i * src_px_stride + src_j] + \
+                    OPT_RANGE_PIXEL_OFFSET; \
+                    \
+                    accum += filt_coeff * img_coeff; \
+                } \
+            } \
+            dst[i * dst_stride + j] = accum; \
+        } \
+    } \
 }
 
-static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w, int h,
-                         int ref_stride, int dis_stride, double *score,
-                         double *score_psnr, double peak, double psnr_max,
-                         void *ctx)
+ansnr_filter2d_fn(uint8_t, 8);
+ansnr_filter2d_fn(uint16_t, 10);
+
+int compute_ansnr(const uint8_t *ref, const uint8_t *main, int w, int h,
+                  int ref_stride, int main_stride, double *score,
+                  double *score_psnr, double peak, double psnr_max, void *ctx)
 {
     ANSNRContext *s = (ANSNRContext *) ctx;
 
-    char *data_top;
+    float *data_top;
 
     float *ref_filt;
-    float *dis_filt;
+    float *main_filt;
 
     float signal, noise;
 
@@ -194,18 +182,29 @@ static int compute_ansnr(const uint8_t *ref, const uint8_t *dis, int w, int h,
     data_top = (float *) (s->data_buf);
 
     ref_filt = (float *) data_top;
-    data_top += buf_sz;
-    dis_filt = (float *) data_top;
-    data_top += buf_sz;
+    data_top += buf_sz / sizeof(float);
+    main_filt = (float *) data_top;
+    data_top += buf_sz / sizeof(float);
 
     buf_stride = buf_stride / sizeof(float);
 
-    ansnr_filter2d(ansnr_filter2d_ref, (const uint8_t *) ref, ref_filt, w, h,
-                   ref_stride, buf_stride, ansnr_filter2d_ref_width, s);
-    ansnr_filter2d(ansnr_filter2d_dis, (const uint8_t *) dis, dis_filt, w, h,
-                   dis_stride, buf_stride, ansnr_filter2d_dis_width, s);
+    if (s->desc->comp[0].depth <= 8) {
+        ansnr_filter2d_8bit(ansnr_filter2d_ref, (const uint8_t *) ref, ref_filt,
+                            w, h, ref_stride, buf_stride,
+                            ansnr_filter2d_ref_width, s);
+        ansnr_filter2d_8bit(ansnr_filter2d_main, (const uint8_t *) main, main_filt,
+                            w, h, main_stride, buf_stride,
+                            ansnr_filter2d_main_width, s);
+    } else {
+        ansnr_filter2d_10bit(ansnr_filter2d_ref, (const uint8_t *) ref, ref_filt,
+                             w, h, ref_stride, buf_stride,
+                             ansnr_filter2d_ref_width, s);
+        ansnr_filter2d_10bit(ansnr_filter2d_main, (const uint8_t *) main, main_filt,
+                             w, h, main_stride, buf_stride,
+                             ansnr_filter2d_main_width, s);
+    }
 
-    ansnr_mse(ref_filt, dis_filt, &signal, &noise, w, h, buf_stride,
+    ansnr_mse(ref_filt, main_filt, &signal, &noise, w, h, buf_stride,
               buf_stride);
 
     *score = (noise==0) ? (psnr_max) : (10.0 * log10(signal / noise));
@@ -241,12 +240,11 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     uint8_t sz;
 
-    if (s->type == 8) {
+    if (s->desc->comp[0].depth <= 8) {
         peak = 255.0;
         max_psnr = 60.0;
         sz = sizeof(uint8_t);
-    }
-    else if (s->type == 10) {
+    } else {
         peak = 255.75;
         max_psnr = 72.0;
         sz = sizeof(uint16_t);
@@ -254,8 +252,8 @@ static AVFrame *do_ansnr(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref
 
     stride = ALIGN_CEIL(w * sz);
 
-    compute_ansnr((const uint8_t *)ref->data[0], (const uint8_t *)main->data[0], w, h, stride, stride, &score,
-                  &score_psnr, peak, max_psnr, s);
+    compute_ansnr((const uint8_t *) ref->data[0], (const uint8_t *) main->data[0],
+                  w, h, stride, stride, &score, &score_psnr, peak, max_psnr, s);
 
     set_meta(metadata, "lavfi.ansnr.score", score);
 
@@ -293,7 +291,7 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     ANSNRContext *s = ctx->priv;
-    s->desc = av_pix_fmt_desc_get(inlink->format);
+
     int buf_stride;
     size_t buf_sz;
 
@@ -307,6 +305,7 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
+    s->desc = av_pix_fmt_desc_get(inlink->format);
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
@@ -314,7 +313,7 @@ static int config_input_ref(AVFilterLink *inlink)
     buf_sz = (size_t)buf_stride * s->height;
 
     if (SIZE_MAX / buf_sz < 3) {
-        av_log(ctx, AV_LOG_ERROR, "insufficient size.\n");
+        av_log(ctx, AV_LOG_ERROR, "SIZE_MAX / buf_sz < 3.\n");
         return AVERROR(EINVAL);
     }
 
@@ -322,8 +321,6 @@ static int config_input_ref(AVFilterLink *inlink)
         av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(ENOMEM);
     }
-
-    s->type = desc->comp[0].depth > 8 ? 10 : 8;
 
     return 0;
 }
@@ -363,12 +360,13 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     ANSNRContext *s = ctx->priv;
 
-    ff_dualinput_uninit(&s->dinput);
-
     av_free(s->data_buf);
 
-    av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", get_ansnr_avg(s->ansnr_sum,
-                                                                s->nb_frames));
+    if(s->nb_frames > 0) {
+        av_log(ctx, AV_LOG_INFO, "ANSNR AVG: %.3f\n", s->ansnr_sum / s->nb_frames);
+    }
+
+    ff_dualinput_uninit(&s->dinput);
 }
 
 static const AVFilterPad ansnr_inputs[] = {
