@@ -605,7 +605,7 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     stride = ALIGN_CEIL(w * sizeof(float));
 
-    // Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET
+    /** Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET */
     if (s->desc->comp[0].depth <= 8) {
         offset_8bit(s, ref, main, stride);
     } else {
