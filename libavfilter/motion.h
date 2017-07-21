@@ -18,12 +18,20 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
- 
+
 #ifndef MOTION_TOOLS_H_
 #define MOTION_TOOLS_H_
 
-static int compute_motion(const float *ref, const float *dis, int w, int h,
-                          int ref_stride, int dis_stride, double *score,
-                          void *ctx);
+static const float FILTER_5[5] = {
+    0.054488685,
+    0.244201342,
+    0.402619947,
+    0.244201342,
+    0.054488685
+};
+
+int compute_motion(const float *ref, const float *dis, int w, int h,
+                   int ref_stride, int dis_stride, double *score,
+                   void *ctx);
 
 #endif /* MOTION_TOOLS_H_ */

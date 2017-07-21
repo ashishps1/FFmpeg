@@ -13,7 +13,6 @@ OBJS = allfilters.o                                                     \
        avfiltergraph.o                                                  \
        buffersink.o                                                     \
        buffersrc.o                                                      \
-       convolution.o                                                    \
        drawutils.o                                                      \
        fifo.o                                                           \
        formats.o                                                        \
