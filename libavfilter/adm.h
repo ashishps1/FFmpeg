@@ -80,8 +80,8 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
 };
 
 int compute_adm1(const float *ref, const float *dis, int w, int h,
-                int ref_stride, int dis_stride, double *score,
-                double *score_num, double *score_den, double *scores,
-                double border_factor, void *s);
+                 int ref_stride, int dis_stride, double *score,
+                 double *score_num, double *score_den, double *scores,
+                 float *data_buf, float *temp_lo, float* temp_hi);
 
 #endif /* AVFILTER_ADM_H */

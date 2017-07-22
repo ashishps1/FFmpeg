@@ -30,8 +30,11 @@ static const float FILTER_5[5] = {
     0.054488685
 };
 
+void convolution_f32(const float *filter, int filt_width, const float *src,
+                     float *dst, float *tmp, int w, int h, int src_stride,
+                     int dst_stride);
+
 int compute_motion1(const float *ref, const float *dis, int w, int h,
-                   int ref_stride, int dis_stride, double *score,
-                   void *ctx);
+                    int ref_stride, int dis_stride, double *score);
 
 #endif /* MOTION_TOOLS_H_ */
