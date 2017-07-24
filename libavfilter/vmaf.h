@@ -30,7 +30,7 @@ typedef struct {
     size_t size;
 } DArray;
 
-void init_array(DArray *a, size_t init_size);
-void insert_array(DArray *a, double e);
-void free_array(DArray *a);
-double get_at(DArray *a, int pos);
+void init_arr(DArray *a, size_t init_size);
+void append_array(DArray *a, double e);
+void free_arr(DArray *a);
+double get_at_pos(DArray *a, int pos);

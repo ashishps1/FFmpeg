@@ -60,6 +60,7 @@ typedef struct VMAFContext {
     float *vif_data_buf;
     float *vif_temp;
     double vmaf_sum;
+    double prev_motion_score;
     uint64_t nb_frames;
     char *model_path;
     char *log_path;
@@ -67,13 +68,11 @@ typedef struct VMAFContext {
     int enable_transform;
     int phone_model;
     char *pool;    
-    DArray adm_num_array,
-           adm_den_array,
-           adm_num_scale_array[4],
-           adm_den_scale_array[4],
+    DArray adm_array,
+           adm_scale_array[4],
            motion_array,
-           vif_num_scale_array[4],
-           vif_den_scale_array[4],
+           motion2_array,
+           vif_scale_array[4],
            vif_array;
 } VMAFContext;
 
@@ -96,16 +95,17 @@ AVFILTER_DEFINE_CLASS(vmaf);
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 #define INIT_FRAMES 1000
+#define ADM2_CONSTANT 0.0
+#define ADM_SCALE_CONSTANT 0.0
 
-
-void init_array(DArray *a, size_t init_size)
+void init_arr(DArray *a, size_t init_size)
 {
     a->array = (double *) av_malloc(init_size * sizeof(double));
     a->used = 0;
     a->size = init_size;
 }
 
-void insert_array(DArray *a, double e)
+void append_array(DArray *a, double e)
 {
     if (a->used == a->size) {
         a->size *= 2;
@@ -114,12 +114,12 @@ void insert_array(DArray *a, double e)
     a->array[a->used++] = e;
 }
 
-double get_at(DArray *a, int pos)
+double get_at_pos(DArray *a, int pos)
 {
     return a->array[pos];
 }
 
-void free_array(DArray *a)
+void free_arr(DArray *a)
 {
     av_free(a->array);
     a->array = NULL;
@@ -165,7 +165,7 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
     int stride;
     size_t data_sz;
     int i,j;
-
+ 
     stride = ALIGN_CEIL(s->width * sizeof(float));
     data_sz = (size_t)stride * s->height;
 
@@ -173,12 +173,10 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
                  &s->score_num, &s->score_den, s->scores, s->adm_data_buf,
                  s->adm_temp_lo, s->adm_temp_hi);
 
-    insert_array(&s->adm_num_array, s->score_num);
-    insert_array(&s->adm_den_array, s->score_den);
+    append_array(&s->adm_array, ((s->score_num + ADM_SCALE_CONSTANT) / (s->score_den + ADM_SCALE_CONSTANT)));
     j = 0;
     for(i = 0; j < 4; i += 2) {
-        insert_array(&s->adm_num_scale_array[j], s->scores[i]);
-        insert_array(&s->adm_den_scale_array[j], s->scores[i+1]);
+        append_array(&s->adm_scale_array[j], ((s->scores[i] + ADM_SCALE_CONSTANT) / (s->scores[i+1] + ADM_SCALE_CONSTANT)));
         j++;
     }
     printf("adm : %.3f ",s->score);
@@ -196,7 +194,13 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
 
     memcpy(s->prev_blur_data, s->blur_data, data_sz);
 
-    insert_array(&s->motion_array, s->score);
+    append_array(&s->motion_array, s->score);
+    
+    if(s->nb_frames > 0) {
+        append_array(&s->motion2_array, FFMIN(s->prev_motion_score, s->score));
+    }
+    
+    s->prev_motion_score = s->score;
     printf("motion : %.3f ",s->score);
 
     compute_vif1(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
@@ -204,11 +208,10 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
                  s->vif_temp);
     j = 0;
     for(i = 0; j < 4; i += 2) {
-        insert_array(&s->vif_num_scale_array[j], s->scores[i]);
-        insert_array(&s->vif_den_scale_array[j], s->scores[i+1]);
+        append_array(&s->vif_scale_array[j], ((s->scores[i]) / (s->scores[i+1])));
         j++;
     }
-    insert_array(&s->vif_array, s->score);
+    append_array(&s->vif_array, s->score);
     printf("vif : %.3f\n",s->score);
 
     return 0;
@@ -244,18 +247,16 @@ static av_cold int init(AVFilterContext *ctx)
 
     if(!s->called) {
         int i;
-        init_array(&s->adm_num_array, INIT_FRAMES);
-        init_array(&s->adm_den_array, INIT_FRAMES);
+        init_arr(&s->adm_array, INIT_FRAMES);
         for(i = 0; i < 4; i++) {
-            init_array(&s->adm_num_scale_array[i], INIT_FRAMES);
-            init_array(&s->adm_den_scale_array[i], INIT_FRAMES);
+            init_arr(&s->adm_scale_array[i], INIT_FRAMES);
         }
-        init_array(&s->motion_array, INIT_FRAMES);
+        init_arr(&s->motion_array, INIT_FRAMES);
+        init_arr(&s->motion2_array, INIT_FRAMES);
         for(i = 0; i < 4; i++) {
-            init_array(&s->vif_num_scale_array[i], INIT_FRAMES);
-            init_array(&s->vif_den_scale_array[i], INIT_FRAMES);
+            init_arr(&s->vif_scale_array[i], INIT_FRAMES);
         }
-        init_array(&s->vif_array, INIT_FRAMES);
+        init_arr(&s->vif_array, INIT_FRAMES);
     }
 
     s->called = 1;
@@ -371,7 +372,6 @@ static int config_input_ref(AVFilterLink *inlink)
     return 0;
 }
 
-
 static int config_output(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
@@ -408,32 +408,36 @@ static av_cold void uninit(AVFilterContext *ctx)
     int i;
 
     if (s->nb_frames > 0) {
+        append_array(&s->motion2_array, s->prev_motion_score);
+        for(i = 0; i < s->nb_frames; i++) {
+            printf("motion: %.3f motion2: %.3f\n",get_at_pos(&s->motion_array, i),get_at_pos(&s->motion2_array, i));
+        }
+                
         av_log(ctx, AV_LOG_INFO, "VMAF AVG: %.3f\n", s->vmaf_sum / s->nb_frames);        
-    }
 
-    free_array(&s->adm_num_array);
-    free_array(&s->adm_den_array);
-    for(i = 0; i < 4; i++) {
-        free_array(&s->adm_num_scale_array[i]);
-        free_array(&s->adm_den_scale_array[i]);
-    }
-    free_array(&s->motion_array);
-    for(i = 0; i < 4; i++) {
-        free_array(&s->vif_num_scale_array[i]);
-        free_array(&s->vif_den_scale_array[i]);
-    }
-    free_array(&s->vif_array);
+        free_arr(&s->adm_array);
+        for(i = 0; i < 4; i++) {
+            free_arr(&s->adm_scale_array[i]);
+        }
+        free_arr(&s->motion_array);
+        free_arr(&s->motion2_array);
+        for(i = 0; i < 4; i++) {
+            free_arr(&s->vif_scale_array[i]);
+        }
+        free_arr(&s->vif_array);
+        
+        av_free(s->ref_data);
+        av_free(s->main_data);
+        av_free(s->adm_data_buf);
+        av_free(s->adm_temp_lo);
+        av_free(s->adm_temp_hi);
+        av_free(s->prev_blur_data);
+        av_free(s->blur_data);
+        av_free(s->temp_data);
+        av_free(s->vif_data_buf);
+        av_free(s->vif_temp);
     
-    av_free(s->ref_data);
-    av_free(s->main_data);
-    av_free(s->adm_data_buf);
-    av_free(s->adm_temp_lo);
-    av_free(s->adm_temp_hi);
-    av_free(s->prev_blur_data);
-    av_free(s->blur_data);
-    av_free(s->temp_data);
-    av_free(s->vif_data_buf);
-    av_free(s->vif_temp);
+    }
 
     ff_dualinput_uninit(&s->dinput);
 }
