@@ -36,6 +36,7 @@
 #include "adm.h"
 #include "motion.h"
 #include "vif.h"
+#include "loadpickle.h"
 #include "vmaf.h"
 
 typedef struct VMAFContext {
@@ -124,6 +125,22 @@ void free_arr(DArray *a)
     av_free(a->array);
     a->array = NULL;
     a->used = a->size = 0;
+}
+
+static void read_pkl(char *model_path)
+{
+    FILE *file;
+    int pkl_size;
+    char buffer[2000];
+    file = fopen( model_path , "rb");
+    fseek(file, 0L, SEEK_END);
+    pkl_size = ftell(file);
+    rewind(file);
+    fread(buffer, pkl_size, 1, file);
+    int sz=0;
+    printf("\n%s\n",buffer);
+    fclose(file);
+    //printf("\nfile size = %d\n",sz);    
 }
 
 #define offset_fn(type, bits) \
@@ -408,10 +425,11 @@ static av_cold void uninit(AVFilterContext *ctx)
     int i;
 
     if (s->nb_frames > 0) {
+        read_pkl(s->model_path);
         append_array(&s->motion2_array, s->prev_motion_score);
-        for(i = 0; i < s->nb_frames; i++) {
+        /** for(i = 0; i < s->nb_frames; i++) {
             printf("motion: %.3f motion2: %.3f\n",get_at_pos(&s->motion_array, i),get_at_pos(&s->motion2_array, i));
-        }
+        }*/
                 
         av_log(ctx, AV_LOG_INFO, "VMAF AVG: %.3f\n", s->vmaf_sum / s->nb_frames);        
 
