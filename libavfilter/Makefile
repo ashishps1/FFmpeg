@@ -23,6 +23,7 @@ OBJS = adm.o                                                            \
        graphparser.o                                                    \
        motion.o                                                         \
        opencl_allkernels.o                                              \
+       svm.o                                                            \
        transform.o                                                      \
        video.o                                                          \
        vif.o                                                            \
