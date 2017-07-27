@@ -79,8 +79,8 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
     { 0.023013, 0.030018, 0.039156, 0.030018 }
 };
 
-int compute_adm1(const float *ref, const float *dis, int w, int h,
-                 int ref_stride, int dis_stride, double *score,
+int compute_adm1(const float *ref, const float *main, int w, int h,
+                 int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp_lo, float* temp_hi);
 

@@ -7,8 +7,7 @@ HEADERS = avfilter.h                                                    \
           buffersrc.h                                                   \
           version.h                                                     \
 
-OBJS = adm.o                                                            \
-       allfilters.o                                                     \
+OBJS = allfilters.o                                                     \
        audio.o                                                          \
        avfilter.o                                                       \
        avfiltergraph.o                                                  \
@@ -21,12 +20,10 @@ OBJS = adm.o                                                            \
        framequeue.o                                                     \
        graphdump.o                                                      \
        graphparser.o                                                    \
-       motion.o                                                         \
        opencl_allkernels.o                                              \
        svm.o                                                            \
        transform.o                                                      \
        video.o                                                          \
-       vif.o                                                            \
 
 OBJS-$(HAVE_THREADS)                         += pthread.o
 
@@ -130,6 +127,7 @@ OBJS-$(CONFIG_SINE_FILTER)                   += asrc_sine.o
 OBJS-$(CONFIG_ANULLSINK_FILTER)              += asink_anullsink.o
 
 # video filters
+OBJS-$(CONFIG_ADM_FILTER)                    += vf_adm.o dualinput.o framesync.o
 OBJS-$(CONFIG_ALPHAEXTRACT_FILTER)           += vf_extractplanes.o
 OBJS-$(CONFIG_ALPHAMERGE_FILTER)             += vf_alphamerge.o
 OBJS-$(CONFIG_ASS_FILTER)                    += vf_subtitles.o
@@ -237,6 +235,7 @@ OBJS-$(CONFIG_MESTIMATE_FILTER)              += vf_mestimate.o motion_estimation
 OBJS-$(CONFIG_METADATA_FILTER)               += f_metadata.o
 OBJS-$(CONFIG_MIDEQUALIZER_FILTER)           += vf_midequalizer.o framesync.o
 OBJS-$(CONFIG_MINTERPOLATE_FILTER)           += vf_minterpolate.o motion_estimation.o
+OBJS-$(CONFIG_MOTION_FILTER)                 += vf_motion.o dualinput.o framesync.o
 OBJS-$(CONFIG_MPDECIMATE_FILTER)             += vf_mpdecimate.o
 OBJS-$(CONFIG_NEGATE_FILTER)                 += vf_lut.o
 OBJS-$(CONFIG_NLMEANS_FILTER)                += vf_nlmeans.o
@@ -325,6 +324,7 @@ OBJS-$(CONFIG_VECTORSCOPE_FILTER)            += vf_vectorscope.o
 OBJS-$(CONFIG_VFLIP_FILTER)                  += vf_vflip.o
 OBJS-$(CONFIG_VIDSTABDETECT_FILTER)          += vidstabutils.o vf_vidstabdetect.o
 OBJS-$(CONFIG_VIDSTABTRANSFORM_FILTER)       += vidstabutils.o vf_vidstabtransform.o
+OBJS-$(CONFIG_VIF_FILTER)                    += vf_vif.o dualinput.o framesync.o
 OBJS-$(CONFIG_VIGNETTE_FILTER)               += vf_vignette.o
 OBJS-$(CONFIG_VMAF_FILTER)                   += vf_vmaf.o dualinput.o framesync.o
 OBJS-$(CONFIG_VSTACK_FILTER)                 += vf_stack.o framesync.o

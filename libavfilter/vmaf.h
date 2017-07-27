@@ -31,6 +31,6 @@ typedef struct {
 } DArray;
 
 void init_arr(DArray *a, size_t init_size);
-void append_array(DArray *a, double e);
+void append_arr(DArray *a, double e);
 void free_arr(DArray *a);
 double get_at_pos(DArray *a, int pos);

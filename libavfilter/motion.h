@@ -34,7 +34,7 @@ void convolution_f32(const float *filter, int filt_width, const float *src,
                      float *dst, float *tmp, int w, int h, int src_stride,
                      int dst_stride);
 
-int compute_motion1(const float *ref, const float *dis, int w, int h,
-                    int ref_stride, int dis_stride, double *score);
+int compute_motion1(const float *ref, const float *main, int w, int h,
+                    int ref_stride, int main_stride, double *score);
 
 #endif /* MOTION_TOOLS_H_ */
