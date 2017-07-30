@@ -42,7 +42,6 @@ typedef struct MotionContext {
     int filter[5];
     int width;
     int height;
-    uint8_t *ref_data;
     uint8_t *prev_blur_data;
     uint8_t *blur_data;
     uint8_t *temp_data;
@@ -295,10 +294,6 @@ static int config_input_ref(AVFilterLink *inlink)
     stride = ALIGN_CEIL(s->width * sizeof(uint8_t));
     data_sz = (size_t)stride * s->height;
 
-    if (!(s->ref_data = av_malloc(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "ref_buf allocation failed.\n");
-        return AVERROR(ENOMEM);
-    }
     if (!(s->prev_blur_data = av_mallocz(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "prev_blur_buf allocation failed.\n");
         return AVERROR(ENOMEM);
@@ -353,7 +348,6 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_INFO, "Motion AVG: %.3f\n", s->motion_sum / s->nb_frames);
     }
 
-    av_free(s->ref_data);
     av_free(s->prev_blur_data);
     av_free(s->blur_data);
     av_free(s->temp_data);

@@ -22,9 +22,11 @@
 #ifndef AVFILTER_VIF_H
 #define AVFILTER_VIF_H
 
-int compute_vif2(const float *ref, const float *main, int w, int h,
+#define N 15
+
+int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_t *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 float *data_buf, float *temp);
+                 uint64_t *data_buf, uint64_t *temp);
 
 #endif /* AVFILTER_VIF_H */

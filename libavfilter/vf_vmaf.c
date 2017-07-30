@@ -256,9 +256,9 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
 
     s->prev_motion_score = s->score;
 
-    compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
+    /*compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
-                 s->vif_temp);
+                 s->vif_temp);*/
     j = 0;
     for(i = 0; j < 4; i += 2) {
         append_arr(&s->vif_scale_array[j], (double)((s->scores[i]) / (s->scores[i+1])));
