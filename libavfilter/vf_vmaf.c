@@ -224,7 +224,7 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
     stride = ALIGN_CEIL(s->width * sizeof(float));
     data_sz = (size_t)stride * s->height;
 
-    compute_adm1(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
+    compute_adm2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->adm_data_buf,
                  s->adm_temp_lo, s->adm_temp_hi);
 
@@ -242,7 +242,7 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
     if(!s->nb_frames) {
         s->score = 0.0;
     } else {
-        compute_motion1(s->prev_blur_data, s->blur_data, s->width, s->height,
+        compute_motion2(s->prev_blur_data, s->blur_data, s->width, s->height,
                         stride, stride, &s->score);
     }
 
@@ -256,7 +256,7 @@ static int compute_vmaf(const float *ref, const float *main, int w, int h,
 
     s->prev_motion_score = s->score;
 
-    compute_vif1(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
+    compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
                  s->vif_temp);
     j = 0;
@@ -402,7 +402,7 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
-    if (!(s->temp_data = av_mallocz(data_sz * 2))) {
+    if (!(s->temp_data = av_mallocz(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "temp data allocation failed.\n");
         return AVERROR(ENOMEM);
     }

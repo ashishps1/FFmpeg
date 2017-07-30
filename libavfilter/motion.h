@@ -22,6 +22,8 @@
 #ifndef MOTION_TOOLS_H_
 #define MOTION_TOOLS_H_
 
+#define N 15
+
 static const float FILTER_5[5] = {
     0.054488685,
     0.244201342,
@@ -30,11 +32,11 @@ static const float FILTER_5[5] = {
     0.054488685
 };
 
-void convolution_f32(const float *filter, int filt_width, const float *src,
-                     float *dst, float *tmp, int w, int h, int src_stride,
+void convolution_f32(const int *filter, int filt_width, const uint8_t *src,
+                     uint8_t *dst, uint8_t *tmp, int w, int h, int src_stride,
                      int dst_stride);
 
-int compute_motion1(const float *ref, const float *main, int w, int h,
+int compute_motion2(const uint8_t *ref, const uint8_t *main, int w, int h,
                     int ref_stride, int main_stride, double *score);
 
 #endif /* MOTION_TOOLS_H_ */

@@ -27,6 +27,8 @@
 /** Percentage of frame to discard on all 4 sides */
 #define ADM_BORDER_FACTOR (0.1)
 
+#define N 15
+
 typedef struct adm_dwt_band_t {
     float *band_a; /** Low-pass V + low-pass H. */
     float *band_v; /** Low-pass V + high-pass H. */
@@ -51,7 +53,7 @@ struct dwt_model_params {
     float g[4];
 };
 
-static const float dwt2_db2_coeffs_lo[4] = { 0.482962913144690, 0.836516303737469, 0.224143868041857, -0.129409522550921 };
+static const float dwt2_db2_coeffs_lo[4] = {  0.482962913144690,  0.836516303737469, 0.224143868041857, -0.129409522550921 };
 static const float dwt2_db2_coeffs_hi[4] = { -0.129409522550921, -0.224143868041857, 0.836516303737469, -0.482962913144690 };
 
 /** 0 -> Y, 1 -> Cb, 2 -> Cr */
@@ -79,7 +81,8 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
     { 0.023013, 0.030018, 0.039156, 0.030018 }
 };
 
-int compute_adm1(const float *ref, const float *main, int w, int h,
+/** function to compute adm score */
+int compute_adm2(const float *ref, const float *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp_lo, float* temp_hi);

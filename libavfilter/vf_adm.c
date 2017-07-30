@@ -59,7 +59,6 @@ AVFILTER_DEFINE_CLASS(adm);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define OPT_RANGE_PIXEL_OFFSET (-128)
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static float rcp(float x)
@@ -70,11 +69,19 @@ static float rcp(float x)
 
 #define DIVS(n, d) ((n) * rcp(d))
 
+/**
+ * lambda = 0 (finest scale), 1, 2, 3 (coarsest scale);
+ * theta = 0 (ll), 1 (lh - vertical), 2 (hh - diagonal), 3(hl - horizontal).
+ */
 av_always_inline static float dwt_quant_step(const struct dwt_model_params *params,
                                              int lambda, int theta)
 {
+    /** Formula (1), page 1165 - display visual resolution (DVR),
+     * in pixels/degree of visual angle. This should be 56.55
+     */
     float r = VIEW_DIST * REF_DISPLAY_HEIGHT * M_PI / 180.0;
 
+    /** Formula (9), page 1171 */
     float temp = log10(pow(2.0, lambda+1) * params->f0 * params->g[theta] / r);
     float Q = 2.0 * params->a * pow(10.0, params->k * temp * temp) /
         dwt_7_9_basis_function_amplitudes[lambda][theta];
@@ -109,7 +116,7 @@ static float adm_sum_cube(const float *x, int w, int h, int stride,
     }
 
     return powf(sum, 1.0f / 3.0f) + powf((bottom - top) * (right - left) /
-                                           32.0f, 1.0f / 3.0f);
+                                         32.0f, 1.0f / 3.0f);
 }
 
 static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
@@ -153,7 +160,27 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
             tmph = kh * oh;
             tmpv = kv * ov;
             tmpd = kd * od;
-
+            /** Determine if angle between (oh,ov) and (th,tv) is less than 1 degree.
+             * Given that u is the angle (oh,ov) and v is the angle (th,tv), this can
+             * be done by testing the inequvality.
+             *
+             * { (u.v.) >= 0 } AND { (u.v)^2 >= cos(1deg)^2 * ||u||^2 * ||v||^2 }
+             *
+             * Proof:
+             *
+             * cos(theta) = (u.v) / (||u|| * ||v||)
+             *
+             * IF u.v >= 0 THEN
+             *   cos(theta)^2 = (u.v)^2 / (||u||^2 * ||v||^2)
+             *   (u.v)^2 = cos(theta)^2 * ||u||^2 * ||v||^2
+             *
+             *   IF |theta| < 1deg THEN
+             *     (u.v)^2 >= cos(1deg)^2 * ||u||^2 * ||v||^2
+             *   END
+             * ELSE
+             *   |theta| > 90deg
+             * END
+             */
             ot_dp = oh * th + ov * tv;
             o_mag_sq = oh * oh + ov * ov;
             t_mag_sq = th * th + tv * tv;
@@ -298,7 +325,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 }
 
 static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
-                     int src_stride, int dst_stride, float *temp_lo, float* temp_hi)
+                     int src_stride, int dst_stride, float *temp_lo,
+                     float* temp_hi)
 {
     const float *filter_lo = dwt2_db2_coeffs_lo;
     const float *filter_hi = dwt2_db2_coeffs_hi;
@@ -420,7 +448,7 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
     return data_top;
 }
 
-int compute_adm1(const float *ref, const float *main, int w, int h,
+int compute_adm2(const float *ref, const float *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp_lo, float* temp_hi)
@@ -486,8 +514,10 @@ int compute_adm1(const float *ref, const float *main, int w, int h,
         float num_scale = 0.0;
         float den_scale = 0.0;
 
-        adm_dwt2(curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride, temp_lo, temp_hi);
-        adm_dwt2(curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride, temp_lo, temp_hi);
+        adm_dwt2(curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride,
+                 temp_lo, temp_hi);
+        adm_dwt2(curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride,
+                 temp_lo, temp_hi);
 
         w = (w + 1) / 2;
         h = (h + 1) / 2;
@@ -561,8 +591,8 @@ int compute_adm1(const float *ref, const float *main, int w, int h,
     \
     for(i = 0; i < h; i++) { \
         for(j = 0; j < w; j++) { \
-            ref_ptr_data[j] = (float) ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
-            main_ptr_data[j] = (float) main_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
+            ref_ptr_data[j] = (float) ref_ptr[j]; \
+            main_ptr_data[j] = (float) main_ptr[j]; \
         } \
         ref_ptr += ref_stride / sizeof(type); \
         ref_ptr_data += stride / sizeof(float); \
@@ -574,17 +604,11 @@ int compute_adm1(const float *ref, const float *main, int w, int h,
 offset_fn(uint8_t, 8);
 offset_fn(uint16_t, 10);
 
-static void set_meta(AVDictionary **metadata, const char *key, char comp, float d)
+static void set_meta(AVDictionary **metadata, const char *key, float d)
 {
     char value[128];
     snprintf(value, sizeof(value), "%0.2f", d);
-    if (comp) {
-        char key2[128];
-        snprintf(key2, sizeof(key2), "%s%c", key, comp);
-        av_dict_set(metadata, key2, value, 0);
-    } else {
-        av_dict_set(metadata, key, value, 0);
-    }
+    av_dict_set(metadata, key, value, 0);
 }
 
 static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
@@ -604,17 +628,18 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     stride = ALIGN_CEIL(w * sizeof(float));
 
-    /** Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET */
+    /** Offset ref and main pixels by OPT_RANGE_PIXEL_OFFSET */
     if (s->desc->comp[0].depth <= 8) {
         offset_8bit(s, ref, main, stride);
     } else {
         offset_10bit(s, ref, main, stride);
     }
 
-    compute_adm1(s->ref_data, s->main_data, w, h, stride, stride, &score,
-                 &score_num, &score_den, scores, s->data_buf, s->temp_lo, s->temp_hi);
+    compute_adm2(s->ref_data, s->main_data, w, h, stride, stride, &score,
+                 &score_num, &score_den, scores, s->data_buf, s->temp_lo,
+                 s->temp_hi);
 
-    set_meta(metadata, "lavfi.adm.score", 0, score);
+    set_meta(metadata, "lavfi.adm.score", score);
 
     s->nb_frames++;
 

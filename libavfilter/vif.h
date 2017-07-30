@@ -19,7 +19,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-int compute_vif1(const float *ref, const float *main, int w, int h,
+#ifndef AVFILTER_VIF_H
+#define AVFILTER_VIF_H
+
+int compute_vif2(const float *ref, const float *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp);
+
+#endif /* AVFILTER_VIF_H */

@@ -41,7 +41,6 @@ typedef struct VIFContext {
     const AVPixFmtDescriptor *desc;
     int width;
     int height;
-    uint8_t type;
     float *data_buf;
     float *temp;
     float *ref_data;
@@ -63,8 +62,12 @@ AVFILTER_DEFINE_CLASS(vif);
 
 const int vif_filter1d_width1[4] = { 17, 9, 5, 3 };
 const float vif_filter1d_table[4][17] = {
-    { 0x1.e8a77p-8,  0x1.d373b2p-7, 0x1.9a1cf6p-6, 0x1.49fd9ep-5, 0x1.e7092ep-5, 0x1.49a044p-4, 0x1.99350ep-4, 0x1.d1e76ap-4, 0x1.e67f8p-4, 0x1.d1e76ap-4, 0x1.99350ep-4, 0x1.49a044p-4, 0x1.e7092ep-5, 0x1.49fd9ep-5, 0x1.9a1cf6p-6, 0x1.d373b2p-7, 0x1.e8a77p-8 },
-    { 0x1.36efdap-6, 0x1.c9eaf8p-5, 0x1.ef4ac2p-4, 0x1.897424p-3, 0x1.cb1b88p-3, 0x1.897424p-3, 0x1.ef4ac2p-4, 0x1.c9eaf8p-5, 0x1.36efdap-6 },
+    { 0x1.e8a77p-8,  0x1.d373b2p-7, 0x1.9a1cf6p-6, 0x1.49fd9ep-5, 0x1.e7092ep-5,
+      0x1.49a044p-4, 0x1.99350ep-4, 0x1.d1e76ap-4, 0x1.e67f8p-4,  0x1.d1e76ap-4,
+      0x1.99350ep-4, 0x1.49a044p-4, 0x1.e7092ep-5, 0x1.49fd9ep-5, 0x1.9a1cf6p-6,
+      0x1.d373b2p-7, 0x1.e8a77p-8 },
+    { 0x1.36efdap-6, 0x1.c9eaf8p-5, 0x1.ef4ac2p-4, 0x1.897424p-3, 0x1.cb1b88p-3,
+      0x1.897424p-3, 0x1.ef4ac2p-4, 0x1.c9eaf8p-5, 0x1.36efdap-6 },
     { 0x1.be5f0ep-5, 0x1.f41fd6p-3, 0x1.9c4868p-2, 0x1.f41fd6p-3, 0x1.be5f0ep-5 },
     { 0x1.54be4p-3,  0x1.55a0ep-1,  0x1.54be4p-3 }
 };
@@ -77,7 +80,7 @@ static void vif_dec2(const float *src, float *dst, int src_w, int src_h,
 
     int i, j;
 
-    // decimation by 2 in each direction (after gaussian blur check)
+    /** decimation by 2 in each direction (after gaussian blur check) */
     for (i = 0; i < src_h / 2; i++) {
         for (j = 0; j < src_w / 2; j++) {
             dst[i * dst_px_stride + j] = src[(i * 2) * src_px_stride + (j * 2)];
@@ -147,15 +150,11 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
             if (sigma1_sq < sigma_nsq) {
                 num_val = 1.0 - sigma2_sq*sigma_max_inv;
                 den_val = 1.0;
-            }
-            else {
+            } else {
                 sv_sq = (sigma2_sq + sigma_nsq) * sigma1_sq;
-                if( sigma12 < 0 )
-                {
+                if( sigma12 < 0 ) {
                     num_val = 0.0;
-                }
-                else
-                {
+                } else {
                     g = sv_sq - sigma12 * sigma12;
                     num_val = log2f(sv_sq / g);
                 }
@@ -202,7 +201,6 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
                          float *temp_buf, int w, int h, int src_stride,
                          int dst_stride, int filt_w, float *temp)
 {
-
     int src_px_stride = src_stride / sizeof(float);
     int dst_px_stride = dst_stride / sizeof(float);
 
@@ -211,7 +209,7 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
     int i, j, filt_i, filt_j, ii, jj;
 
     for (i = 0; i < h; i++) {
-        /* Vertical pass. */
+        /** Vertical pass. */
         for (j = 0; j < w; j++) {
             float sum = 0;
 
@@ -229,7 +227,7 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
             temp[j] = sum;
         }
 
-        /* Horizontal pass. */
+        /** Horizontal pass. */
         for (j = 0; j < w; j++) {
             float sum = 0;
 
@@ -249,7 +247,7 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
     }
 }
 
-int compute_vif1(const float *ref, const float *main, int w, int h,
+int compute_vif2(const float *ref, const float *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp)
@@ -292,47 +290,60 @@ int compute_vif1(const float *ref, const float *main, int w, int h,
 
     ref_scale = (float *) data_top;
     data_top += buf_sz;
+
     main_scale = (float *) data_top;
     data_top += buf_sz;
+
     ref_sq = (float *) data_top;
     data_top += buf_sz;
+
     main_sq = (float *) data_top;
     data_top += buf_sz;
+
     ref_main = (float *) data_top;
     data_top += buf_sz;
+
     mu1 = (float *) data_top;
     data_top += buf_sz;
+
     mu2 = (float *) data_top;
     data_top += buf_sz;
+
     mu1_sq = (float *) data_top;
     data_top += buf_sz;
+
     mu2_sq = (float *) data_top;
     data_top += buf_sz;
+
     mu1_mu2 = (float *) data_top;
     data_top += buf_sz;
+
     ref_sq_filt = (float *) data_top;
     data_top += buf_sz;
+
     main_sq_filt = (float *) data_top;
     data_top += buf_sz;
+
     ref_main_filt = (float *) data_top;
     data_top += buf_sz;
+
     num_array = (float *) data_top;
     data_top += buf_sz;
+
     den_array = (float *) data_top;
     data_top += buf_sz;
+
     temp_buf = (float *) data_top;
     data_top += buf_sz;
 
-    for (scale = 0; scale < 4; scale++)
-    {
+    for (scale = 0; scale < 4; scale++) {
         const float *filter = vif_filter1d_table[scale];
         int filter_width = vif_filter1d_width1[scale];
 
         int buf_valid_w = w;
         int buf_valid_h = h;
 
-        if (scale > 0)
-        {
+        if (scale > 0) {
             vif_filter1d(filter, curr_ref_scale, mu1, temp_buf, w, h,
                          curr_ref_stride, buf_stride, filter_width, temp);
             vif_filter1d(filter, curr_main_scale, mu2, temp_buf, w, h,
@@ -393,6 +404,7 @@ int compute_vif1(const float *ref, const float *main, int w, int h,
         *score_num += scores[2*scale];
         *score_den += scores[2*scale+1];
     }
+
     if (*score_den == 0.0) {
         *score = 1.0f;
     } else {
@@ -466,7 +478,7 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
         offset_10bit(s, ref, main, stride);
     }
 
-    compute_vif1(s->ref_data, s->main_data, w, h, stride, stride, &score,
+    compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &score,
                  &score_num, &score_den, scores, s->data_buf, s->temp);
 
     set_meta(metadata, "lavfi.vif.score", score);
@@ -525,29 +537,24 @@ static int config_input_ref(AVFilterLink *inlink)
     stride = ALIGN_CEIL(s->width * sizeof(float));
     data_sz = (size_t)stride * s->height;
 
-    if (SIZE_MAX / data_sz < 15)
-    {
+    if (SIZE_MAX / data_sz < 15) {
         av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz < 15\n");
         return AVERROR(EINVAL);
     }
 
-    if (!(s->data_buf = av_malloc(data_sz * 16)))
-    {
+    if (!(s->data_buf = av_malloc(data_sz * 16))) {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for data_buf.\n");
         return AVERROR(ENOMEM);
     }
-    if (!(s->ref_data = av_malloc(data_sz)))
-    {
+    if (!(s->ref_data = av_malloc(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for ref_data.\n");
         return AVERROR(ENOMEM);
     }
-    if (!(s->main_data = av_malloc(data_sz)))
-    {
+    if (!(s->main_data = av_malloc(data_sz))) {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for main_data.\n");
         return AVERROR(ENOMEM);
     }
-    if (!(s->temp = av_malloc(s->width * sizeof(float))))
-    {
+    if (!(s->temp = av_malloc(s->width * sizeof(float)))) {
         av_log(ctx, AV_LOG_ERROR, "error: av_malloc failed for temp.\n");
         return AVERROR(ENOMEM);
     }
@@ -593,13 +600,13 @@ static av_cold void uninit(AVFilterContext *ctx)
     if (s->nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "VIF AVG: %.3f\n", s->vif_sum / s->nb_frames);
     }
-    
+
     av_free(s->data_buf);
     av_free(s->ref_data);
     av_free(s->main_data);
     av_free(s->temp);
 
-    ff_dualinput_uninit(&s->dinput);    
+    ff_dualinput_uninit(&s->dinput);
 }
 
 static const AVFilterPad vif_inputs[] = {
