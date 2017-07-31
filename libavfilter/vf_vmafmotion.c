@@ -51,7 +51,6 @@ typedef struct VMAFMotionContext {
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define OPT_RANGE_PIXEL_OFFSET (-128)
 
 static const AVOption vmafmotion_options[] = {
     { NULL }
@@ -59,10 +58,10 @@ static const AVOption vmafmotion_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmafmotion);
 
-static double image_sad(const uint8_t *img1, const uint8_t *img2, int w,
-                        int h, int img1_stride, int img2_stride)
+static double image_sad(const uint8_t *img1, const uint8_t *img2, int w, int h,
+                        int img1_stride, int img2_stride)
 {
-    int sum = 0.0;
+    int sum = 0;
 
     for (int i = 0; i < h; i++) {
         for (int j = 0; j < w; j++) {
@@ -94,22 +93,27 @@ av_always_inline static int convolution_edge(int horizontal, const int *filter,
     int radius = filt_w / 2;
 
     int sum = 0;
-    for (int k = 0; k < filt_w; ++k) {
-        int i_tap = horizontal ? i : i - radius + k;
-        int j_tap = horizontal ? j - radius + k : j;
-
-        if (horizontal) {
+    int k;
+    if(horizontal) {
+        for (k = 0; k < filt_w; ++k) {
+            int i_tap = i;
+            int j_tap = j - radius + k;
             j_tap = FFABS(j_tap);
             if (j_tap >= w) {
                 j_tap = w - (j_tap - w + 1);
             }
-        } else {
-            i_tap = FFABS(i_tap);
-            if (i_tap >= h)
-                i_tap = h - (i_tap - h + 1);
+            sum += (filter[k] * src[i_tap * stride + j_tap]);
         }
-
-        sum += (filter[k] * src[i_tap * stride + j_tap]);
+    } else {
+        for (k = 0; k < filt_w; ++k) {
+            int i_tap = i - radius + k;
+            int j_tap = j;
+            i_tap = FFABS(i_tap);
+            if (i_tap >= h) {
+                i_tap = h - (i_tap - h + 1);
+            }
+            sum += (filter[k] * src[i_tap * stride + j_tap]);
+        }
     }
     return sum >> N;
 }
@@ -133,7 +137,7 @@ static void convolution_x(const int *filter, int filt_w,
         for (int j = borders_left; j < borders_right; j += step) {
             int sum = 0;
             for (int k = 0; k < filt_w; k++) {
-                sum += (filter[k] * src[i * src_stride + j - radius + k]);
+                sum += filter[k] * src[i * src_stride + j - radius + k];
             }
             dst[i * dst_stride + j / step] = sum >> N;
         }
@@ -167,7 +171,7 @@ static void convolution_y(const int *filter, int filt_w,
         for (int j = 0; j < w; j++) {
             int sum = 0;
             for (int k = 0; k < filt_w; k++) {
-                sum += (filter[k] * src[(i - radius + k) * src_stride + j]);
+                sum += filter[k] * src[(i - radius + k) * src_stride + j];
             }
             dst[(i / step) * dst_stride + j] = sum >> N;
         }
@@ -193,7 +197,7 @@ void convolution_f32(const int *filter, int filt_w, const uint8_t *src,
 }
 
 int compute_vmafmotion(const uint8_t *ref, const uint8_t *main, int w, int h,
-                    int ref_stride, int main_stride, double *score)
+                       int ref_stride, int main_stride, double *score)
 {
     *score = image_sad(ref, main, w, h, ref_stride / sizeof(uint8_t),
                        main_stride / sizeof(uint8_t));
@@ -228,7 +232,7 @@ static AVFrame *do_vmafmotion(AVFilterContext *ctx, AVFrame *main, const AVFrame
         score = 0.0;
     } else {
         compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
-                        stride, stride, &score);
+                           stride, stride, &score);
     }
 
     memcpy(s->prev_blur_data, s->blur_data, data_sz);
@@ -294,16 +298,13 @@ static int config_input_ref(AVFilterLink *inlink)
     stride = ALIGN_CEIL(s->width * sizeof(uint8_t));
     data_sz = (size_t)stride * s->height;
 
-    if (!(s->prev_blur_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "prev_blur_buf allocation failed.\n");
+    if (!(s->prev_blur_data = av_malloc(data_sz))) {
         return AVERROR(ENOMEM);
     }
-    if (!(s->blur_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "blur_buf allocation failed.\n");
+    if (!(s->blur_data = av_malloc(data_sz))) {
         return AVERROR(ENOMEM);
     }
-    if (!(s->temp_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "temp_buf allocation failed.\n");
+    if (!(s->temp_data = av_malloc(data_sz))) {
         return AVERROR(ENOMEM);
     }
 
