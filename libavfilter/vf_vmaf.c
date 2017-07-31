@@ -34,7 +34,7 @@
 #include "internal.h"
 #include "video.h"
 #include "adm.h"
-#include "motion.h"
+#include "vmaf_motion.h"
 #include "vif.h"
 #include "svm.h"
 #include "vmaf.h"
@@ -232,7 +232,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     } else {
         offset_10bit(s, ref, main, stride);
     }
-    
+
     stride = ALIGN_CEIL(s->width * sizeof(float));
     data_sz = (size_t)stride * s->height;
 
@@ -254,7 +254,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     if(!s->nb_frames) {
         s->score = 0.0;
     } else {
-        compute_motion2(s->prev_blur_data, s->blur_data, s->width, s->height,
+        compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
                         stride, stride, &s->score);
     }
 

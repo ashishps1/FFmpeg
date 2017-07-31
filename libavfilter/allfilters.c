@@ -246,7 +246,6 @@ static void register_all(void)
     REGISTER_FILTER(METADATA,       metadata,       vf);
     REGISTER_FILTER(MIDEQUALIZER,   midequalizer,   vf);
     REGISTER_FILTER(MINTERPOLATE,   minterpolate,   vf);
-    REGISTER_FILTER(MOTION,         motion,         vf);
     REGISTER_FILTER(MPDECIMATE,     mpdecimate,     vf);
     REGISTER_FILTER(NEGATE,         negate,         vf);
     REGISTER_FILTER(NLMEANS,        nlmeans,        vf);
@@ -337,6 +336,7 @@ static void register_all(void)
     REGISTER_FILTER(VIF,            vif,            vf);
     REGISTER_FILTER(VIGNETTE,       vignette,       vf);
     REGISTER_FILTER(VMAF,           vmaf,           vf);
+    REGISTER_FILTER(VMAFMOTION,     vmafmotion,     vf);
     REGISTER_FILTER(VSTACK,         vstack,         vf);
     REGISTER_FILTER(W3FDIF,         w3fdif,         vf);
     REGISTER_FILTER(WAVEFORM,       waveform,       vf);

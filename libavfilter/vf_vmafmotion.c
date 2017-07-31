@@ -32,10 +32,10 @@
 #include "drawutils.h"
 #include "formats.h"
 #include "internal.h"
-#include "motion.h"
+#include "vmaf_motion.h"
 #include "video.h"
 
-typedef struct MotionContext {
+typedef struct VMAFMotionContext {
     const AVClass *class;
     FFDualInputContext dinput;
     const AVPixFmtDescriptor *desc;
@@ -47,17 +47,17 @@ typedef struct MotionContext {
     uint8_t *temp_data;
     double motion_sum;
     uint64_t nb_frames;
-} MotionContext;
+} VMAFMotionContext;
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 
-static const AVOption motion_options[] = {
+static const AVOption vmafmotion_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(motion);
+AVFILTER_DEFINE_CLASS(vmafmotion);
 
 static double image_sad(const uint8_t *img1, const uint8_t *img2, int w,
                         int h, int img1_stride, int img2_stride)
@@ -192,7 +192,7 @@ void convolution_f32(const int *filter, int filt_w, const uint8_t *src,
                   dst_stride, 1);
 }
 
-int compute_motion2(const uint8_t *ref, const uint8_t *main, int w, int h,
+int compute_vmafmotion(const uint8_t *ref, const uint8_t *main, int w, int h,
                     int ref_stride, int main_stride, double *score)
 {
     *score = image_sad(ref, main, w, h, ref_stride / sizeof(uint8_t),
@@ -208,9 +208,9 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata, key, value, 0);
 }
 
-static AVFrame *do_motion(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static AVFrame *do_vmafmotion(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 {
-    MotionContext *s = ctx->priv;
+    VMAFMotionContext *s = ctx->priv;
     AVDictionary **metadata = &main->metadata;
     int ref_stride;
     int stride;
@@ -227,13 +227,13 @@ static AVFrame *do_motion(AVFilterContext *ctx, AVFrame *main, const AVFrame *re
     if(!s->nb_frames) {
         score = 0.0;
     } else {
-        compute_motion2(s->prev_blur_data, s->blur_data, s->width, s->height,
+        compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
                         stride, stride, &score);
     }
 
     memcpy(s->prev_blur_data, s->blur_data, data_sz);
 
-    set_meta(metadata, "lavfi.motion.score", score);
+    set_meta(metadata, "lavfi.vmafmotion.score", score);
 
     s->nb_frames++;
 
@@ -244,14 +244,14 @@ static AVFrame *do_motion(AVFilterContext *ctx, AVFrame *main, const AVFrame *re
 
 static av_cold int init(AVFilterContext *ctx)
 {
-    MotionContext *s = ctx->priv;
+    VMAFMotionContext *s = ctx->priv;
 
     int i;
     for(i = 0; i < 5; i++) {
         s->filter[i] = lrint(FILTER_5[i] * (1 << N));
     }
 
-    s->dinput.process = do_motion;
+    s->dinput.process = do_vmafmotion;
 
     return 0;
 }
@@ -273,7 +273,7 @@ static int query_formats(AVFilterContext *ctx)
 static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
-    MotionContext *s = ctx->priv;
+    VMAFMotionContext *s = ctx->priv;
     int stride;
     size_t data_sz;
 
@@ -313,7 +313,7 @@ static int config_input_ref(AVFilterLink *inlink)
 static int config_output(AVFilterLink *outlink)
 {
     AVFilterContext *ctx = outlink->src;
-    MotionContext *s = ctx->priv;
+    VMAFMotionContext *s = ctx->priv;
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
 
@@ -330,19 +330,19 @@ static int config_output(AVFilterLink *outlink)
 
 static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
 {
-    MotionContext *s = inlink->dst->priv;
+    VMAFMotionContext *s = inlink->dst->priv;
     return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
 }
 
 static int request_frame(AVFilterLink *outlink)
 {
-    MotionContext *s = outlink->src->priv;
+    VMAFMotionContext *s = outlink->src->priv;
     return ff_dualinput_request_frame(&s->dinput, outlink);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
-    MotionContext *s = ctx->priv;
+    VMAFMotionContext *s = ctx->priv;
 
     if (s->nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "Motion AVG: %.3f\n", s->motion_sum / s->nb_frames);
@@ -355,7 +355,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     ff_dualinput_uninit(&s->dinput);
 }
 
-static const AVFilterPad motion_inputs[] = {
+static const AVFilterPad vmafmotion_inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
@@ -369,7 +369,7 @@ static const AVFilterPad motion_inputs[] = {
     { NULL }
 };
 
-static const AVFilterPad motion_outputs[] = {
+static const AVFilterPad vmafmotion_outputs[] = {
     {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
@@ -379,14 +379,14 @@ static const AVFilterPad motion_outputs[] = {
     { NULL }
 };
 
-AVFilter ff_vf_motion = {
-    .name          = "motion",
+AVFilter ff_vf_vmafmotion = {
+    .name          = "vmafmotion",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the Motion between two video streams."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
-    .priv_size     = sizeof(MotionContext),
-    .priv_class    = &motion_class,
-    .inputs        = motion_inputs,
-    .outputs       = motion_outputs,
+    .priv_size     = sizeof(VMAFMotionContext),
+    .priv_class    = &vmafmotion_class,
+    .inputs        = vmafmotion_inputs,
+    .outputs       = vmafmotion_outputs,
 };
