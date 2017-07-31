@@ -60,7 +60,7 @@ static const AVOption motion_options[] = {
 AVFILTER_DEFINE_CLASS(motion);
 
 static double image_sad(const uint8_t *img1, const uint8_t *img2, int w,
-                       int h, int img1_stride, int img2_stride)
+                        int h, int img1_stride, int img2_stride)
 {
     int sum = 0.0;
 
@@ -87,9 +87,9 @@ static inline int ceiln(int n, int m)
 }
 
 av_always_inline static int convolution_edge(int horizontal, const int *filter,
-                                               int filt_w, const uint8_t *src,
-                                               int w, int h, int stride, int i,
-                                               int j)
+                                             int filt_w, const uint8_t *src,
+                                             int w, int h, int stride, int i,
+                                             int j)
 {
     int radius = filt_w / 2;
 
@@ -249,8 +249,8 @@ static av_cold int init(AVFilterContext *ctx)
     int i;
     for(i = 0; i < 5; i++) {
         s->filter[i] = lrint(FILTER_5[i] * (1 << N));
-    }    
-    
+    }
+
     s->dinput.process = do_motion;
 
     return 0;

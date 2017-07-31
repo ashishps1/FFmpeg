@@ -61,18 +61,6 @@ static const AVOption vif_options[] = {
 
 AVFILTER_DEFINE_CLASS(vif);
 
-const int vif_filter1d_width1[4] = { 17, 9, 5, 3 };
-const float vif_filter1d_table[4][17] = {
-    { 0x1.e8a77p-8,  0x1.d373b2p-7, 0x1.9a1cf6p-6, 0x1.49fd9ep-5, 0x1.e7092ep-5,
-      0x1.49a044p-4, 0x1.99350ep-4, 0x1.d1e76ap-4, 0x1.e67f8p-4,  0x1.d1e76ap-4,
-      0x1.99350ep-4, 0x1.49a044p-4, 0x1.e7092ep-5, 0x1.49fd9ep-5, 0x1.9a1cf6p-6,
-      0x1.d373b2p-7, 0x1.e8a77p-8 },
-    { 0x1.36efdap-6, 0x1.c9eaf8p-5, 0x1.ef4ac2p-4, 0x1.897424p-3, 0x1.cb1b88p-3,
-      0x1.897424p-3, 0x1.ef4ac2p-4, 0x1.c9eaf8p-5, 0x1.36efdap-6 },
-    { 0x1.be5f0ep-5, 0x1.f41fd6p-3, 0x1.9c4868p-2, 0x1.f41fd6p-3, 0x1.be5f0ep-5 },
-    { 0x1.54be4p-3,  0x1.55a0ep-1,  0x1.54be4p-3 }
-};
-
 static void vif_dec2(const uint64_t *src, uint64_t *dst, int src_w, int src_h,
                      int src_stride, int dst_stride)
 {
@@ -330,7 +318,7 @@ int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_
 
     for (scale = 0; scale < 4; scale++) {
         const int *filter = vif_filter[scale];
-        int filter_width = vif_filter1d_width1[scale];
+        int filter_width = vif_filter_width[scale];
 
         int buf_valid_w = w;
         int buf_valid_h = h;
@@ -488,8 +476,8 @@ static av_cold int init(AVFilterContext *ctx)
     
     int i,j;
     for(i = 0; i < 4; i++) {
-        for(j = 0; j < vif_filter1d_width1[i]; j++){
-            s->vif_filter[i][j] = lrint(vif_filter1d_table[i][j] * (1 << N));
+        for(j = 0; j < vif_filter_width[i]; j++){
+            s->vif_filter[i][j] = lrint(vif_filter_table[i][j] * (1 << N));
         }
     }    
     
