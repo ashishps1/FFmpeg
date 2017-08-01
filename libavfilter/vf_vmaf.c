@@ -247,7 +247,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
         j++;
     }
 
-    convolution_f32(s->conv_filter, 5, ref->data[0], s->blur_data, s->temp_data,
+    /*convolution_f32(s->conv_filter, 5, ref->data[0], s->blur_data, s->temp_data,
                     s->width, s->height, stride / sizeof(uint8_t), stride /
                     sizeof(uint8_t));
 
@@ -256,7 +256,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     } else {
         compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
                         stride, stride, &s->score);
-    }
+    }*/
 
     memcpy(s->prev_blur_data, s->blur_data, data_sz);
 

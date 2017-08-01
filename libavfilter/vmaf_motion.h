@@ -32,11 +32,11 @@ static const float FILTER_5[5] = {
     0.054488685
 };
 
-void convolution_f32(const int *filter, int filt_width, const uint8_t *src,
-                     uint8_t *dst, uint8_t *tmp, int w, int h, int src_stride,
-                     int dst_stride);
+void convolution_f32(const int *filter, int filt_width, const void *src,
+                     uint16_t *dst, uint16_t *tmp, int w, int h, ptrdiff_t src_stride,
+                     ptrdiff_t dst_stride, uint8_t type);
 
-int compute_vmafmotion(const uint8_t *ref, const uint8_t *main, int w, int h,
-                    int ref_stride, int main_stride, double *score);
+int compute_vmafmotion(const uint16_t *ref, const uint16_t *main, int w, int h,
+                    ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score);
 
 #endif /* MOTION_TOOLS_H_ */

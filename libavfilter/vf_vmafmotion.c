@@ -42,9 +42,9 @@ typedef struct VMAFMotionContext {
     int filter[5];
     int width;
     int height;
-    uint8_t *prev_blur_data;
-    uint8_t *blur_data;
-    uint8_t *temp_data;
+    uint16_t *prev_blur_data;
+    uint16_t *blur_data;
+    uint16_t *temp_data;
     double motion_sum;
     uint64_t nb_frames;
 } VMAFMotionContext;
@@ -58,17 +58,15 @@ static const AVOption vmafmotion_options[] = {
 
 AVFILTER_DEFINE_CLASS(vmafmotion);
 
-static double image_sad(const uint8_t *img1, const uint8_t *img2, int w, int h,
-                        int img1_stride, int img2_stride)
+static double image_sad(const uint16_t *img1, const uint16_t *img2, int w, int h,
+                        ptrdiff_t img1_stride, ptrdiff_t img2_stride)
 {
-    int sum = 0;
+    uint64_t sum = 0;
+    int i, j;
 
-    for (int i = 0; i < h; i++) {
-        for (int j = 0; j < w; j++) {
-            float img1px = img1[i * img1_stride + j];
-            float img2px = img2[i * img2_stride + j];
-
-            sum += abs(img1px - img2px);
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < w; j++) {
+            sum += abs(img1[i * img1_stride + j] - img2[i * img2_stride + j]);
         }
     }
 
@@ -85,122 +83,123 @@ static inline int ceiln(int n, int m)
     return n % m ? n + (m - n % m) : n;
 }
 
-av_always_inline static int convolution_edge(int horizontal, const int *filter,
-                                             int filt_w, const uint8_t *src,
-                                             int w, int h, int stride, int i,
-                                             int j)
+static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
+                          uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                          ptrdiff_t dst_stride)
 {
     int radius = filt_w / 2;
-
+    int borders_left = ceiln(radius, 1);
+    int borders_right = floorn(w - (filt_w - radius), 1);
+    int i, j, k;
     int sum = 0;
-    int k;
-    if(horizontal) {
-        for (k = 0; k < filt_w; ++k) {
-            int i_tap = i;
-            int j_tap = j - radius + k;
-            j_tap = FFABS(j_tap);
-            if (j_tap >= w) {
-                j_tap = w - (j_tap - w + 1);
+
+    for (i = 0; i < h; i++) {
+        for (j = 0; j < borders_left; j++) {
+            sum = 0;
+            for (k = 0; k < filt_w; k++) {
+                int j_tap = FFABS(j - radius + k);
+                if (j_tap >= w) {
+                    j_tap = w - (j_tap - w + 1);
+                }
+                sum += filter[k] * src[i * src_stride + j_tap];
             }
-            sum += (filter[k] * src[i_tap * stride + j_tap]);
-        }
-    } else {
-        for (k = 0; k < filt_w; ++k) {
-            int i_tap = i - radius + k;
-            int j_tap = j;
-            i_tap = FFABS(i_tap);
-            if (i_tap >= h) {
-                i_tap = h - (i_tap - h + 1);
-            }
-            sum += (filter[k] * src[i_tap * stride + j_tap]);
-        }
-    }
-    return sum >> N;
-}
-
-static void convolution_x(const int *filter, int filt_w,
-                          const uint8_t *src, uint8_t *dst, int w, int h,
-                          int src_stride, int dst_stride, int step)
-{
-    int radius = filt_w / 2;
-    int borders_left = ceiln(radius, step);
-    int borders_right = floorn(w - (filt_w - radius), step);
-
-    for (int i = 0; i < h; i++) {
-        for (int j = 0; j < borders_left; j += step) {
-            dst[i * dst_stride + j / step] = convolution_edge(1, filter,
-                                                              filt_w, src,
-                                                              w, h, src_stride,
-                                                              i, j);
+            dst[i * dst_stride + j] = sum >> N;
         }
 
-        for (int j = borders_left; j < borders_right; j += step) {
+        for (j = borders_left; j < borders_right; j++) {
             int sum = 0;
-            for (int k = 0; k < filt_w; k++) {
+            for (k = 0; k < filt_w; k++) {
                 sum += filter[k] * src[i * src_stride + j - radius + k];
             }
-            dst[i * dst_stride + j / step] = sum >> N;
+            dst[i * dst_stride + j] = sum >> N;
         }
 
-        for (int j = borders_right; j < w; j += step) {
-            dst[i * dst_stride + j / step] = convolution_edge(1, filter,
-                                                              filt_w, src,
-                                                              w, h, src_stride,
-                                                              i, j);
-        }
-    }
-}
-
-static void convolution_y(const int *filter, int filt_w,
-                          const uint8_t *src, uint8_t *dst, int w, int h,
-                          int src_stride, int dst_stride, int step)
-{
-    int radius = filt_w / 2;
-    int borders_top = ceiln(radius, step);
-    int borders_bottom = floorn(h - (filt_w - radius), step);
-
-    for (int i = 0; i < borders_top; i += step) {
-        for (int j = 0; j < w; j++) {
-            dst[(i / step) * dst_stride + j] = convolution_edge(0, filter,
-                                                                filt_w, src,
-                                                                w, h, src_stride,
-                                                                i, j);
-        }
-    }
-    for (int i = borders_top; i < borders_bottom; i += step) {
-        for (int j = 0; j < w; j++) {
-            int sum = 0;
-            for (int k = 0; k < filt_w; k++) {
-                sum += filter[k] * src[(i - radius + k) * src_stride + j];
+        for (j = borders_right; j < w; j++) {
+            sum = 0;
+            for (k = 0; k < filt_w; k++) {
+                int j_tap = FFABS(j - radius + k);
+                if (j_tap >= w) {
+                    j_tap = w - (j_tap - w + 1);
+                }
+                sum += filter[k] * src[i * src_stride + j_tap];
             }
-            dst[(i / step) * dst_stride + j] = sum >> N;
-        }
-    }
-    for (int i = borders_bottom; i < h; i += step) {
-        for (int j = 0; j < w; j++) {
-            dst[(i / step) * dst_stride + j] = convolution_edge(0, filter,
-                                                                filt_w, src,
-                                                                w, h, src_stride,
-                                                                i, j);
+            dst[i * dst_stride + j] = sum >> N;
         }
     }
 }
 
-void convolution_f32(const int *filter, int filt_w, const uint8_t *src,
-                     uint8_t *dst, uint8_t *tmp, int w, int h, int src_stride,
-                     int dst_stride)
-{
-    convolution_y(filter, filt_w, src, tmp, w, h, src_stride,
-                  dst_stride, 1);
-    convolution_x(filter, filt_w, tmp, dst, w, h, dst_stride,
-                  dst_stride, 1);
+#define conv_y_fn(type, bits) \
+    static void convolution_y_##bits##bit(const int *filter, int filt_w, \
+                                          const type *src, uint16_t *dst, \
+                                          int w, int h, ptrdiff_t src_stride, \
+                                          ptrdiff_t dst_stride) \
+{ \
+    int radius = filt_w / 2; \
+    int borders_top = ceiln(radius, 1); \
+    int borders_bottom = floorn(h - (filt_w - radius), 1); \
+    int i, j, k; \
+    int sum = 0; \
+    \
+    for (i = 0; i < borders_top; i++) { \
+        for (j = 0; j < w; j++) { \
+            sum = 0; \
+            for (k = 0; k < filt_w; k++) { \
+                int i_tap = FFABS(i - radius + k); \
+                if (i_tap >= h) { \
+                    i_tap = h - (i_tap - h + 1); \
+                } \
+                sum += filter[k] * src[i_tap * src_stride + j]; \
+            } \
+            dst[i* dst_stride + j] = sum >> N; \
+        } \
+    } \
+    for (i = borders_top; i < borders_bottom; i++) { \
+        for (j = 0; j < w; j++) { \
+            sum = 0; \
+            for (k = 0; k < filt_w; k++) { \
+                sum += filter[k] * src[(i - radius + k) * src_stride + j]; \
+            } \
+            dst[i* dst_stride + j] = sum >> N; \
+        } \
+    } \
+    for (i = borders_bottom; i < h; i++) { \
+        for (j = 0; j < w; j++) { \
+            sum = 0; \
+            for (k = 0; k < filt_w; k++) { \
+                int i_tap = FFABS(i - radius + k); \
+                if (i_tap >= h) { \
+                    i_tap = h - (i_tap - h + 1); \
+                } \
+                sum += filter[k] * src[i_tap * src_stride + j]; \
+            } \
+            dst[i* dst_stride + j] = sum >> N; \
+        } \
+    } \
 }
 
-int compute_vmafmotion(const uint8_t *ref, const uint8_t *main, int w, int h,
-                       int ref_stride, int main_stride, double *score)
+conv_y_fn(uint8_t, 8);
+conv_y_fn(uint16_t, 10);
+
+void convolution_f32(const int *filter, int filt_w, const void *src,
+                     uint16_t *dst, uint16_t *tmp, int w, int h, ptrdiff_t src_stride,
+                     ptrdiff_t dst_stride, uint8_t type)
 {
-    *score = image_sad(ref, main, w, h, ref_stride / sizeof(uint8_t),
-                       main_stride / sizeof(uint8_t));
+    if(type == 8) {
+        convolution_y_8bit(filter, filt_w, (const uint8_t *) src, tmp, w, h,
+                           src_stride, dst_stride);
+    } else {
+        convolution_y_10bit(filter, filt_w, (const uint16_t *) src, tmp, w, h,
+                            src_stride, dst_stride);
+    }
+
+    convolution_x(filter, filt_w, tmp, dst, w, h, dst_stride, dst_stride);
+}
+
+int compute_vmafmotion(const uint16_t *ref, const uint16_t *main, int w, int h,
+                       ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score)
+{
+    *score = image_sad(ref, main, w, h, ref_stride / sizeof(uint16_t),
+                       main_stride / sizeof(uint16_t));
 
     return 0;
 }
@@ -216,17 +215,29 @@ static AVFrame *do_vmafmotion(AVFilterContext *ctx, AVFrame *main, const AVFrame
 {
     VMAFMotionContext *s = ctx->priv;
     AVDictionary **metadata = &main->metadata;
-    int ref_stride;
-    int stride;
+    ptrdiff_t ref_stride;
+    ptrdiff_t ref_px_stride;
+    ptrdiff_t stride;
+    ptrdiff_t px_stride;
     size_t data_sz;
     double score;
-    ref_stride = ref->linesize[0];
-    stride = ALIGN_CEIL(s->width * sizeof(uint8_t));
-    data_sz = (size_t)stride * s->height;
 
-    convolution_f32(s->filter, 5, ref->data[0], s->blur_data, s->temp_data,
-                    s->width, s->height, ref_stride / sizeof(uint8_t), stride /
-                    sizeof(uint8_t));
+    ref_stride = ref->linesize[0];
+    stride = ALIGN_CEIL(s->width * sizeof(uint16_t));
+    data_sz = (size_t)stride * s->height;
+    px_stride = stride / sizeof(uint16_t);
+
+    if (s->desc->comp[0].depth <= 8) {
+        ref_px_stride = ref_stride / sizeof(uint8_t);
+        convolution_f32(s->filter, 5, (const uint8_t *) ref->data[0],
+                        s->blur_data, s->temp_data, s->width, s->height,
+                        ref_px_stride, px_stride, 8);
+    } else {
+        ref_px_stride = ref_stride / sizeof(uint16_t);
+        convolution_f32(s->filter, 5, (const uint16_t *) ref->data[0],
+                        s->blur_data, s->temp_data, s->width, s->height,
+                        ref_px_stride, px_stride, 10);
+    }
 
     if(!s->nb_frames) {
         score = 0.0;
@@ -278,7 +289,7 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     VMAFMotionContext *s = ctx->priv;
-    int stride;
+    ptrdiff_t stride;
     size_t data_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
@@ -295,7 +306,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    stride = ALIGN_CEIL(s->width * sizeof(uint8_t));
+    stride = ALIGN_CEIL(s->width * sizeof(uint16_t));
     data_sz = (size_t)stride * s->height;
 
     if (!(s->prev_blur_data = av_malloc(data_sz))) {
