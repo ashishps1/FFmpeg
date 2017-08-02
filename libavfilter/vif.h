@@ -22,24 +22,23 @@
 #ifndef AVFILTER_VIF_H
 #define AVFILTER_VIF_H
 
-#define N 15
+#define N 9
 
 static const int vif_filter_width[4] = { 17, 9, 5, 3 };
 
 static const float vif_filter_table[4][17] = {
-    { 0x1.e8a77p-8,  0x1.d373b2p-7, 0x1.9a1cf6p-6, 0x1.49fd9ep-5, 0x1.e7092ep-5,
-      0x1.49a044p-4, 0x1.99350ep-4, 0x1.d1e76ap-4, 0x1.e67f8p-4,  0x1.d1e76ap-4,
-      0x1.99350ep-4, 0x1.49a044p-4, 0x1.e7092ep-5, 0x1.49fd9ep-5, 0x1.9a1cf6p-6,
-      0x1.d373b2p-7, 0x1.e8a77p-8 },
-    { 0x1.36efdap-6, 0x1.c9eaf8p-5, 0x1.ef4ac2p-4, 0x1.897424p-3, 0x1.cb1b88p-3,
-      0x1.897424p-3, 0x1.ef4ac2p-4, 0x1.c9eaf8p-5, 0x1.36efdap-6 },
-    { 0x1.be5f0ep-5, 0x1.f41fd6p-3, 0x1.9c4868p-2, 0x1.f41fd6p-3, 0x1.be5f0ep-5 },
-    { 0x1.54be4p-3,  0x1.55a0ep-1,  0x1.54be4p-3 }
+    { 0.007456, 0.014266, 0.025031, 0.040282, 0.059453, 0.080475, 0.099904,
+      0.113746, 0.118774, 0.113746, 0.099904, 0.080475, 0.059453, 0.040282,
+      0.025031, 0.014266, 0.007456 },
+    { 0.018978, 0.055898, 0.120921, 0.192116, 0.224174, 0.192116, 0.120921,
+      0.055898, 0.018978 },
+    { 0.054489, 0.244201, 0.402620, 0.244201, 0.054489 },
+    { 0.166378, 0.667243, 0.166378 }
 };
 
-int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_t *main, int w, int h,
+int compute_vif2(const float *ref, const float *main, int w, int h,
                  int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 uint64_t *data_buf, uint64_t *temp);
+                 float *data_buf, float *temp);
 
 #endif /* AVFILTER_VIF_H */

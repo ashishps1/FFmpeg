@@ -21,7 +21,7 @@
 
 /**
  * @file
- * Calculate Motion score between two input videos.
+ * Calculate VMAF Motion score between two input videos.
  */
 
 #include "libavutil/avstring.h"
