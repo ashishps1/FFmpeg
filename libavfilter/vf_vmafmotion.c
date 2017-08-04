@@ -181,8 +181,8 @@ conv_y_fn(uint8_t, 8);
 conv_y_fn(uint16_t, 10);
 
 void convolution_f32(const int *filter, int filt_w, const void *src,
-                     uint16_t *dst, uint16_t *tmp, int w, int h, ptrdiff_t src_stride,
-                     ptrdiff_t dst_stride, uint8_t type)
+                     uint16_t *dst, uint16_t *tmp, int w, int h,
+                     ptrdiff_t src_stride, ptrdiff_t dst_stride, uint8_t type)
 {
     if(type == 8) {
         convolution_y_8bit(filter, filt_w, (const uint8_t *) src, tmp, w, h,
@@ -357,7 +357,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     VMAFMotionContext *s = ctx->priv;
 
     if (s->nb_frames > 0) {
-        av_log(ctx, AV_LOG_INFO, "Motion AVG: %.3f\n", s->motion_sum / s->nb_frames);
+        av_log(ctx, AV_LOG_INFO, "VMAF Motion avg: %.3f\n", s->motion_sum / s->nb_frames);
     }
 
     av_free(s->prev_blur_data);
@@ -393,7 +393,7 @@ static const AVFilterPad vmafmotion_outputs[] = {
 
 AVFilter ff_vf_vmafmotion = {
     .name          = "vmafmotion",
-    .description   = NULL_IF_CONFIG_SMALL("Calculate the Motion between two video streams."),
+    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF Motion between two video streams."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,

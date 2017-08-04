@@ -52,7 +52,6 @@ typedef struct VIFContext {
 #define OFFSET(x) offsetof(VIFContext, x)
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define OPT_RANGE_PIXEL_OFFSET (-128)
 
 static const AVOption vif_options[] = {
     { NULL }
@@ -422,8 +421,8 @@ int compute_vif2(const float *ref, const float *main, int w, int h,
     \
     for(i = 0; i < h; i++) { \
         for(j = 0; j < w; j++) { \
-            ref_ptr_data[j] = (float) ref_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
-            main_ptr_data[j] = (float) main_ptr[j] + OPT_RANGE_PIXEL_OFFSET; \
+            ref_ptr_data[j] = (float) ref_ptr[j]; \
+            main_ptr_data[j] = (float) main_ptr[j]; \
         } \
         ref_ptr += ref_stride / sizeof(type); \
         ref_ptr_data += stride / sizeof(float); \

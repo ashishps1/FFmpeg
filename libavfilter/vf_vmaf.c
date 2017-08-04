@@ -394,31 +394,25 @@ static int config_input_ref(AVFilterLink *inlink)
     }
 
     if (!(s->adm_data_buf = av_malloc(adm_buf_sz * 35))) {
-        av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->adm_temp_lo = av_malloc(stride))) {
-        av_log(ctx, AV_LOG_ERROR, "adm temp lo allocation failed.\n");
         return AVERROR(ENOMEM);
     }
     if (!(s->adm_temp_hi = av_malloc(stride))) {
-        av_log(ctx, AV_LOG_ERROR, "adm temp hi allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->prev_blur_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "prev blur data allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->blur_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "blur data allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->temp_data = av_mallocz(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "temp data allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
@@ -429,13 +423,11 @@ static int config_input_ref(AVFilterLink *inlink)
 
     if (!(s->vif_data_buf = av_malloc(data_sz * 16)))
     {
-        av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->vif_temp = av_malloc(s->width * sizeof(float))))
     {
-        av_log(ctx, AV_LOG_ERROR, "temp allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
