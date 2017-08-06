@@ -39,6 +39,7 @@ typedef struct VIFContext {
     const AVClass *class;
     FFDualInputContext dinput;
     const AVPixFmtDescriptor *desc;
+    int filter[4][17];
     int width;
     int height;
     float *data_buf;
@@ -105,7 +106,7 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
                           int num_stride, int den_stride)
 {
     static const float sigma_nsq = 2;
-    static const float sigma_max_inv = 4.0/(255.0*255.0);
+    static const float sigma_max_inv = 4.0 / (255.0 * 255.0);
 
     int mu1_sq_px_stride  = mu1_sq_stride / sizeof(float);
     int mu2_sq_px_stride  = mu2_sq_stride / sizeof(float);
@@ -135,7 +136,7 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
             sigma12   = xy_filt_val - mu1_mu2_val;
 
             if (sigma1_sq < sigma_nsq) {
-                num_val = 1.0 - sigma2_sq*sigma_max_inv;
+                num_val = 1.0 - sigma2_sq * sigma_max_inv;
                 den_val = 1.0;
             } else {
                 sv_sq = (sigma2_sq + sigma_nsq) * sigma1_sq;
@@ -145,9 +146,9 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
                     g = sv_sq - sigma12 * sigma12;
                     num_val = log2f(sv_sq / g);
                 }
-                den_val = log2f(1.0f + sigma1_sq / sigma_nsq);
+                den_val = log2f(1.0 + sigma1_sq / sigma_nsq);
             }
-
+            printf("%f %f\n",num_val, den_val);
             num[i * num_px_stride + j] = num_val;
             den[i * den_px_stride + j] = den_val;
         }
@@ -204,7 +205,10 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
                 filt_coeff = filter[filt_i];
 
                 ii = i - filt_w / 2 + filt_i;
-                ii = ii < 0 ? -ii : (ii >= h ? 2 * h - ii - 1 : ii);
+                ii = FFABS(ii);
+                if(ii >= h) {
+                    ii = 2 * h - ii - 1;
+                }
 
                 img_coeff = src[ii * src_px_stride + j];
 
@@ -222,7 +226,10 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
                 filt_coeff = filter[filt_j];
 
                 jj = j - filt_w / 2 + filt_j;
-                jj = jj < 0 ? -jj : (jj >= w ? 2 * w - jj - 1 : jj);
+                jj = FFABS(jj);
+                if(jj >= w) {
+                    jj = 2 * w - jj - 1;
+                }                
 
                 img_coeff = temp[jj];
 
@@ -381,19 +388,19 @@ int compute_vif2(const float *ref, const float *main, int w, int h,
         num = vif_sum(num_array, buf_valid_w, buf_valid_h, buf_stride);
         den = vif_sum(den_array, buf_valid_w, buf_valid_h, buf_stride);
 
-        scores[2*scale] = num;
-        scores[2*scale+1] = den;
+        scores[2 * scale] = num;
+        scores[2 * scale + 1] = den;
     }
 
     *score_num = 0.0;
     *score_den = 0.0;
     for (scale = 0; scale < 4; scale++) {
-        *score_num += scores[2*scale];
-        *score_den += scores[2*scale+1];
+        *score_num += scores[2 * scale];
+        *score_den += scores[2 * scale + 1];
     }
 
     if (*score_den == 0.0) {
-        *score = 1.0f;
+        *score = 1.0;
     } else {
         *score = (*score_num) / (*score_den);
     }
@@ -480,6 +487,13 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 static av_cold int init(AVFilterContext *ctx)
 {
     VIFContext *s = ctx->priv;
+    
+    int i, j;
+    for(i = 0; i < 4; i++) {
+        for(j = 0; j < vif_filter_width[i]; j++) {
+            s->filter[j] = lrint(vif_filter_table[i][j] * (1 << N));
+        }
+    }
 
     s->dinput.process = do_vif;
 

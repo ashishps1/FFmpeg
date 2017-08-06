@@ -22,7 +22,7 @@
 #ifndef AVFILTER_VIF_H
 #define AVFILTER_VIF_H
 
-#define N 9
+#define N 15
 
 static const int vif_filter_width[4] = { 17, 9, 5, 3 };
 
