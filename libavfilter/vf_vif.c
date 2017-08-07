@@ -157,87 +157,95 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
     }
 }
 
-static void vif_xx_yy_xy(const uint64_t *x, const uint64_t *y, uint64_t *xx, uint64_t *yy,
-                         uint64_t *xy, int w, int h, ptrdiff_t xstride, ptrdiff_t ystride,
-                         ptrdiff_t xxstride, ptrdiff_t yystride, ptrdiff_t xystride)
-{
-    ptrdiff_t x_px_stride = xstride / sizeof(uint64_t);
-    ptrdiff_t y_px_stride = ystride / sizeof(uint64_t);
-    ptrdiff_t xx_px_stride = xxstride / sizeof(uint64_t);
-    ptrdiff_t yy_px_stride = yystride / sizeof(uint64_t);
-    ptrdiff_t xy_px_stride = xystride / sizeof(uint64_t);
-
-    int i, j;
-
-    int xval, yval, xxval, yyval, xyval;
-
-    for (i = 0; i < h; i++) {
-        for (j = 0; j < w; j++) {
-            xval = x[i * x_px_stride + j];
-            yval = y[i * y_px_stride + j];
-
-            xxval = xval * xval;
-            yyval = yval * yval;
-            xyval = xval * yval;
-
-            xx[i * xx_px_stride + j] = xxval;
-            yy[i * yy_px_stride + j] = yyval;
-            xy[i * xy_px_stride + j] = xyval;
-        }
-    }
+#define vif_xy_fn(type, bits) \
+    static void vif_xx_yy_xy_##bits##bit(const type *x, const type *y, uint64_t *xx, uint64_t *yy, \
+                                         uint64_t *xy, int w, int h, ptrdiff_t xstride, ptrdiff_t ystride, \
+                                         ptrdiff_t xxstride, ptrdiff_t yystride, ptrdiff_t xystride) \
+{ \
+    ptrdiff_t x_px_stride = xstride / sizeof(type); \
+    ptrdiff_t y_px_stride = ystride / sizeof(type); \
+    ptrdiff_t xx_px_stride = xxstride / sizeof(uint64_t); \
+    ptrdiff_t yy_px_stride = yystride / sizeof(uint64_t); \
+    ptrdiff_t xy_px_stride = xystride / sizeof(uint64_t); \
+    \
+    int i, j; \
+    \
+    int xval, yval, xxval, yyval, xyval; \
+    \
+    for (i = 0; i < h; i++) { \
+        for (j = 0; j < w; j++) { \
+            xval = x[i * x_px_stride + j]; \
+            yval = y[i * y_px_stride + j]; \
+            \
+            xxval = xval * xval; \
+            yyval = yval * yval; \
+            xyval = xval * yval; \
+            \
+            xx[i * xx_px_stride + j] = xxval; \
+            yy[i * yy_px_stride + j] = yyval; \
+            xy[i * xy_px_stride + j] = xyval; \
+        } \
+    } \
 }
 
-static void vif_filter1d(const int *filter, const uint64_t *src, uint64_t *dst,
-                         uint64_t *temp_buf, int w, int h, ptrdiff_t src_stride,
-                         ptrdiff_t dst_stride, int filt_w, uint64_t *temp)
-{
-    ptrdiff_t src_px_stride = src_stride / sizeof(uint64_t);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(uint64_t);
-
-    int i, j, filt_i, filt_j, ii, jj;
-
-    for (i = 0; i < h; i++) {
-        /** Vertical pass. */
-        for (j = 0; j < w; j++) {
-            int sum = 0;
-
-            for (filt_i = 0; filt_i < filt_w; filt_i++) {
-            
-                ii = i - filt_w / 2 + filt_i;
-                ii = FFABS(ii);
-                if(ii >= h) {
-                    ii = 2 * h - ii - 1;
-                }
-
-                sum += filter[filt_i] * src[ii * src_px_stride + j];
-            }
-            temp[j] = sum >> N;
-        }
-
-        /** Horizontal pass. */
-        for (j = 0; j < w; j++) {
-            int sum = 0;
-
-            for (filt_j = 0; filt_j < filt_w; filt_j++) {
-            
-                jj = j - filt_w / 2 + filt_j;
-                jj = FFABS(jj);
-                if(jj >= w) {
-                    jj = 2 * w - jj - 1;
-                }
-
-                sum += filter[filt_j] * temp[jj];
-            }
-
-            dst[i * dst_px_stride + j] = sum >> N;
-        }
-    }
+#define vif_filter1d_fn(type, bits) \
+    static void vif_filter1d_##bits##bit(const int *filter, const type *src, uint64_t *dst, \
+                                         uint64_t *temp_buf, int w, int h, ptrdiff_t src_stride, \
+                                         ptrdiff_t dst_stride, int filt_w, uint64_t *temp) \
+{ \
+    ptrdiff_t src_px_stride = src_stride / sizeof(type); \
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(uint64_t); \
+    \
+    int i, j, filt_i, filt_j, ii, jj; \
+    \
+    for (i = 0; i < h; i++) { \
+        /** Vertical pass. */ \
+        for (j = 0; j < w; j++) { \
+            int sum = 0; \
+            \
+            for (filt_i = 0; filt_i < filt_w; filt_i++) { \
+                ii = i - filt_w / 2 + filt_i; \
+                ii = FFABS(ii); \
+                if(ii >= h) { \
+                    ii = 2 * h - ii - 1; \
+                } \
+                \
+                sum += filter[filt_i] * src[ii * src_px_stride + j]; \
+            } \
+            temp[j] = sum >> N; \
+        } \
+        \
+        /** Horizontal pass. */ \
+        for (j = 0; j < w; j++) { \
+            int sum = 0; \
+            \
+            for (filt_j = 0; filt_j < filt_w; filt_j++) { \
+                jj = j - filt_w / 2 + filt_j; \
+                jj = FFABS(jj); \
+                if(jj >= w) { \
+                    jj = 2 * w - jj - 1; \
+                } \
+                \
+                sum += filter[filt_j] * temp[jj]; \
+            } \
+            \
+            dst[i * dst_px_stride + j] = sum >> N; \
+        } \
+    } \
 }
 
-int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_t *main, int w, int h,
-                 int ref_stride, int main_stride, double *score,
+vif_filter1d_fn(uint8_t, 8);
+vif_filter1d_fn(uint16_t, 16);
+vif_filter1d_fn(uint64_t, 64);
+
+vif_xy_fn(uint8_t, 8);
+vif_xy_fn(uint16_t, 16);
+vif_xy_fn(uint64_t, 64);
+
+int compute_vif2(const int vif_filter[4][17], const void *ref, const void *main, int w, int h,
+                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 uint64_t *data_buf, uint64_t *temp)
+                 uint64_t *data_buf, uint64_t *temp, int type)
 {
     char *data_top;
 
@@ -259,8 +267,8 @@ int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_
     uint64_t *den_array;
     uint64_t *temp_buf;
 
-    const uint64_t *curr_ref_scale = ref;
-    const uint64_t *curr_main_scale = main;
+    const void *curr_ref_scale = ref;
+    const void *curr_main_scale = main;
     int curr_ref_stride = ref_stride;
     int curr_main_stride = main_stride;
 
@@ -330,17 +338,26 @@ int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_
         int buf_valid_w = w;
         int buf_valid_h = h;
 
-        if(!scale) {
-            vif_filter1d(filter, curr_ref_scale, mu1, temp_buf, w, h, curr_ref_stride,
-                         buf_stride, filter_width, temp);
-            vif_filter1d(filter, curr_main_scale, mu2, temp_buf, w, h, curr_main_stride,
-                         buf_stride, filter_width, temp);        
-        } else {
-            vif_filter1d(filter, curr_ref_scale, mu1, temp_buf, w, h,
-                         curr_ref_stride, buf_stride, filter_width, temp);
-            vif_filter1d(filter, curr_main_scale, mu2, temp_buf, w, h,
-                         curr_main_stride, buf_stride, filter_width, temp);
-
+        if(!scale || scale == 1) {
+            if(type <= 8) {
+                vif_filter1d_8bit(filter, (const uint8_t *) curr_ref_scale, mu1, temp_buf, w, h, curr_ref_stride,
+                                  buf_stride, filter_width, temp);
+                vif_filter1d_8bit(filter, (const uint8_t *) curr_main_scale, mu2, temp_buf, w, h, curr_main_stride,
+                                  buf_stride, filter_width, temp);
+                vif_xx_yy_xy_8bit((const uint8_t *) curr_ref_scale, (const uint8_t *) curr_main_scale, ref_sq, main_sq, ref_main,
+                                  w, h, curr_ref_stride, curr_main_stride, buf_stride,
+                                  buf_stride, buf_stride);                                  
+            } else {
+                vif_filter1d_16bit(filter, (const uint16_t *) curr_ref_scale, mu1, temp_buf, w, h, curr_ref_stride,
+                                   buf_stride, filter_width, temp);
+                vif_filter1d_16bit(filter, (const uint16_t *) curr_main_scale, mu2, temp_buf, w, h, curr_main_stride,
+                                   buf_stride, filter_width, temp);
+                vif_xx_yy_xy_16bit((const uint16_t *) curr_ref_scale, (const uint16_t *) curr_main_scale, ref_sq, main_sq, ref_main,
+                                  w, h, curr_ref_stride, curr_main_stride, buf_stride,
+                                  buf_stride, buf_stride);                                   
+            }
+        }
+        if(scale >= 1) {
             vif_dec2(mu1, ref_scale, buf_valid_w, buf_valid_h, buf_stride,
                      buf_stride);
             vif_dec2(mu2, main_scale, buf_valid_w, buf_valid_h, buf_stride,
@@ -357,26 +374,25 @@ int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_
 
             curr_ref_stride = buf_stride;
             curr_main_stride = buf_stride;
-            
-            vif_filter1d(filter, curr_ref_scale, mu1, temp_buf, w, h, curr_ref_stride,
-                         buf_stride, filter_width, temp);
-            vif_filter1d(filter, curr_main_scale, mu2, temp_buf, w, h, curr_main_stride,
-                         buf_stride, filter_width, temp);
+
+            vif_filter1d_64bit(filter, curr_ref_scale, mu1, temp_buf, w, h, curr_ref_stride,
+                               buf_stride, filter_width, temp);
+            vif_filter1d_64bit(filter, curr_main_scale, mu2, temp_buf, w, h, curr_main_stride,
+                               buf_stride, filter_width, temp);
+            vif_xx_yy_xy_64bit(curr_ref_scale, curr_main_scale, ref_sq, main_sq, ref_main,
+                               w, h, curr_ref_stride, curr_main_stride, buf_stride,
+                               buf_stride, buf_stride);                               
         }
 
-        vif_xx_yy_xy(mu1, mu2, mu1_sq, mu2_sq, mu1_mu2, w, h, buf_stride,
-                     buf_stride, buf_stride, buf_stride, buf_stride);
+        vif_xx_yy_xy_64bit(mu1, mu2, mu1_sq, mu2_sq, mu1_mu2, w, h, buf_stride,
+                           buf_stride, buf_stride, buf_stride, buf_stride);
 
-        vif_xx_yy_xy(curr_ref_scale, curr_main_scale, ref_sq, main_sq, ref_main,
-                     w, h, curr_ref_stride, curr_main_stride, buf_stride,
-                     buf_stride, buf_stride);
-
-        vif_filter1d(filter, ref_sq, ref_sq_filt, temp_buf, w, h, buf_stride,
-                     buf_stride, filter_width, temp);
-        vif_filter1d(filter, main_sq, main_sq_filt, temp_buf, w, h, buf_stride,
-                     buf_stride, filter_width, temp);
-        vif_filter1d(filter, ref_main, ref_main_filt, temp_buf, w, h, buf_stride,
-                     buf_stride, filter_width, temp);
+        vif_filter1d_64bit(filter, ref_sq, ref_sq_filt, temp_buf, w, h, buf_stride,
+                           buf_stride, filter_width, temp);
+        vif_filter1d_64bit(filter, main_sq, main_sq_filt, temp_buf, w, h, buf_stride,
+                           buf_stride, filter_width, temp);
+        vif_filter1d_64bit(filter, ref_main, ref_main_filt, temp_buf, w, h, buf_stride,
+                           buf_stride, filter_width, temp);
 
         vif_statistic(mu1_sq, mu2_sq, mu1_mu2, ref_sq_filt, main_sq_filt,
                       ref_main_filt, num_array, den_array, w, h, buf_stride,
@@ -408,37 +424,6 @@ int compute_vif2(const int vif_filter[4][17], const uint64_t *ref, const uint64_
     return ret;
 }
 
-#define offset_fn(type, bits) \
-    static void offset_##bits##bit(VIFContext *s, const AVFrame *ref, AVFrame *main, ptrdiff_t stride) \
-{ \
-    int w = s->width; \
-    int h = s->height; \
-    int i,j; \
-    \
-    ptrdiff_t ref_stride = ref->linesize[0]; \
-    ptrdiff_t main_stride = main->linesize[0]; \
-    \
-    const type *ref_ptr = (const type *) ref->data[0]; \
-    const type *main_ptr = (const type *) main->data[0]; \
-    \
-    uint64_t *ref_ptr_data = s->ref_data; \
-    uint64_t *main_ptr_data = s->main_data; \
-    \
-    for(i = 0; i < h; i++) { \
-        for(j = 0; j < w; j++) { \
-            ref_ptr_data[j] = ref_ptr[j]; \
-            main_ptr_data[j] = main_ptr[j]; \
-        } \
-        ref_ptr += ref_stride / sizeof(type); \
-        ref_ptr_data += stride / sizeof(uint64_t); \
-        main_ptr += main_stride / sizeof(type); \
-        main_ptr_data += stride / sizeof(uint64_t); \
-    } \
-}
-
-offset_fn(uint8_t, 8);
-offset_fn(uint16_t, 10);
-
 static void set_meta(AVDictionary **metadata, const char *key, float d)
 {
     char value[128];
@@ -459,17 +444,16 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int w = s->width;
     int h = s->height;
 
-    ptrdiff_t stride = ALIGN_CEIL(w * sizeof(uint64_t));
+    ptrdiff_t ref_stride = ref->linesize[0];
+    ptrdiff_t main_stride = main->linesize[0];
 
-    /** Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET */
     if (s->desc->comp[0].depth <= 8) {
-        offset_8bit(s, ref, main, stride);
+        compute_vif2(s->vif_filter, (const uint8_t *) ref->data[0], (const uint8_t *) main->data[0], w, h, ref_stride, main_stride, &score,
+                     &score_num, &score_den, scores, s->data_buf, s->temp, s->desc->comp[0].depth);
     } else {
-        offset_10bit(s, ref, main, stride);
+        compute_vif2(s->vif_filter, (const uint16_t *) ref->data[0], (const uint16_t *) main->data[0], w, h, ref_stride, main_stride, &score,
+                     &score_num, &score_den, scores, s->data_buf, s->temp, s->desc->comp[0].depth);
     }
-
-    compute_vif2(s->vif_filter, s->ref_data, s->main_data, w, h, stride, stride, &score,
-                 &score_num, &score_den, scores, s->data_buf, s->temp);
 
     set_meta(metadata, "lavfi.vif.score", score);
 
@@ -483,14 +467,14 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 static av_cold int init(AVFilterContext *ctx)
 {
     VIFContext *s = ctx->priv;
-    
+
     int i,j;
     for(i = 0; i < 4; i++) {
         for(j = 0; j < vif_filter_width[i]; j++){
             s->vif_filter[i][j] = lrint(vif_filter_table[i][j] * (1 << N));
         }
-    }    
-    
+    }
+
     s->dinput.process = do_vif;
 
     return 0;
@@ -516,7 +500,7 @@ static int config_input_ref(AVFilterLink *inlink)
     VIFContext *s = ctx->priv;
     ptrdiff_t stride;
     size_t data_sz;
-    
+
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
         av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
@@ -542,7 +526,7 @@ static int config_input_ref(AVFilterLink *inlink)
     if (!(s->data_buf = av_malloc(data_sz * 16))) {
         return AVERROR(ENOMEM);
     }
-        
+
     if (!(s->ref_data = av_malloc(data_sz))) {
         return AVERROR(ENOMEM);
     }
