@@ -716,17 +716,14 @@ static int config_input_ref(AVFilterLink *inlink)
     }
 
     if (!(s->data_buf = av_malloc(buf_sz * 35))) {
-        av_log(ctx, AV_LOG_ERROR, "data_buf allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->temp_lo = av_malloc(stride))) {
-        av_log(ctx, AV_LOG_ERROR, "temp lo allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->temp_hi = av_malloc(stride))) {
-        av_log(ctx, AV_LOG_ERROR, "temp hi allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 

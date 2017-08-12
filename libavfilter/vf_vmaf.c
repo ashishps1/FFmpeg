@@ -57,11 +57,11 @@ typedef struct VMAFContext {
     float *adm_data_buf;
     float *adm_temp_lo;
     float *adm_temp_hi;
-    uint8_t *prev_blur_data;
-    uint8_t *blur_data;
-    uint8_t *temp_data;
-    float *vif_data_buf;
-    float *vif_temp;
+    uint16_t *prev_blur_data;
+    uint16_t *blur_data;
+    uint16_t *temp_data;
+    uint64_t *vif_data_buf;
+    uint64_t *vif_temp;
     double prev_motion_score;
     double vmaf_score;
     uint64_t nb_frames;
@@ -223,6 +223,9 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     int stride;
     int w = s->width;
     int h = s->height;
+    
+    int ref_stride = ref->linesize[0];
+    int main_stride = main->linesize[0];
 
     stride = ALIGN_CEIL(w * sizeof(float));
 
@@ -250,11 +253,11 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     if (s->desc->comp[0].depth <= 8) {
         convolution_f32(s->conv_filter, 5, (const uint8_t *) ref->data[0],
                         s->blur_data, s->temp_data, s->width, s->height,
-                        stride, stride, 8);
+                        ref_stride, stride, 8);
     } else {
         convolution_f32(s->conv_filter, 5, (const uint16_t *) ref->data[0],
                         s->blur_data, s->temp_data, s->width, s->height,
-                        stride, stride, 10);
+                        ref_stride, stride, 10);
     }
 
     if(!s->nb_frames) {
@@ -273,10 +276,15 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     }
 
     s->prev_motion_score = s->score;
-
-    /*compute_vif2(s->vif_filter, s->ref_data, s->main_data, w, h, stride, stride, &s->score,
-                 &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
-                 s->vif_temp);*/
+    
+    if (s->desc->comp[0].depth <= 8) {
+        compute_vif2(s->vif_filter, (const uint8_t *) ref->data[0], (const uint8_t *) main->data[0], w, h, ref_stride, main_stride, &s->score,
+                     &s->score_num, &s->score_den, s->scores, s->vif_data_buf, s->vif_temp, s->desc->comp[0].depth);
+    } else {
+        compute_vif2(s->vif_filter, (const uint16_t *) ref->data[0], (const uint16_t *) main->data[0], w, h, ref_stride, main_stride, &s->score,
+                     &s->score_num, &s->score_den, s->scores, s->vif_data_buf, s->vif_temp, s->desc->comp[0].depth);
+    }
+    
     j = 0;
     for(i = 0; j < 4; i += 2) {
         append_arr(&s->vif_scale_array[j], (double)((s->scores[i]) / (s->scores[i+1])));
@@ -356,6 +364,8 @@ static int config_input_ref(AVFilterLink *inlink)
     size_t data_sz;
     int adm_buf_stride;
     size_t adm_buf_sz;
+    int vif_buf_stride;
+    size_t vif_buf_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -416,17 +426,20 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
+    vif_buf_stride = ALIGN_CEIL(s->width * sizeof(uint64_t));
+    vif_buf_sz = (size_t)vif_buf_stride * s->height;
+
     if (SIZE_MAX / data_sz < 15) {
         av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz < 15\n");
         return AVERROR(EINVAL);
     }
 
-    if (!(s->vif_data_buf = av_malloc(data_sz * 16)))
+    if (!(s->vif_data_buf = av_malloc(vif_buf_sz * 16)))
     {
         return AVERROR(ENOMEM);
     }
 
-    if (!(s->vif_temp = av_malloc(s->width * sizeof(float))))
+    if (!(s->vif_temp = av_malloc(s->width * sizeof(uint64_t))))
     {
         return AVERROR(ENOMEM);
     }
