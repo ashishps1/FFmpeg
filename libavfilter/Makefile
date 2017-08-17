@@ -21,7 +21,6 @@ OBJS = allfilters.o                                                     \
        graphdump.o                                                      \
        graphparser.o                                                    \
        opencl_allkernels.o                                              \
-       svm.o                                                            \
        transform.o                                                      \
        video.o                                                          \
 

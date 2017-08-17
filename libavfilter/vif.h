@@ -37,9 +37,9 @@ static const float vif_filter_table[4][17] = {
     { 0.166378498,   0.667243004,  0.166378498 }
 };
 
-int compute_vif2(const int filter[4][17], const void *ref, const void *main, int w, int h,
-                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
+int compute_vif2(const float *ref, const float *main, int w, int h,
+                 int ref_stride, int main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 uint64_t *data_buf, uint64_t *temp, int type);
+                 float *data_buf, float *temp);
 
 #endif /* AVFILTER_VIF_H */
