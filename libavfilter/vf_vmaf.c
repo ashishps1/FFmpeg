@@ -95,9 +95,7 @@ AVFILTER_DEFINE_CLASS(vmaf);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define OPT_RANGE_PIXEL_OFFSET (-128)
 #define INIT_FRAMES 1000
-#define ADM_SCALE_CONSTANT 0.0
 
 const char *norm_type = "linear_rescale";
 
@@ -135,6 +133,12 @@ const double slopes[7] = {
     1.5360318811084146,
     1.7620864995501058,
     2.08656468286432
+};
+
+const double score_transform[3] = {
+    1.70674692,
+    1.72643844,
+    -0.00705305
 };
 
 void init_arr(DArray *a, size_t init_size)
@@ -402,9 +406,9 @@ static double svm_predict_values(const svm_model *model, const svm_node *x, doub
             }
         }
 
-        free(kvalue);
-        free(start);
-        free(vote);
+        av_free(kvalue);
+        av_free(start);
+        av_free(vote);
         return model->label[vote_max_idx];
     }
 }
@@ -422,7 +426,7 @@ static double svm_predict(const svm_model *model, const svm_node *x)
         dec_values = Malloc(double, nr_class * (nr_class - 1) / 2);
     }
     pred_result = svm_predict_values(model, x, dec_values);
-    free(dec_values);
+    av_free(dec_values);
     return pred_result;
 }
 
@@ -465,7 +469,7 @@ static char* readline(FILE *input)
  * is used
  */
 #define FSCANF(_stream, _format, _var) do{ if (fscanf(_stream, _format, _var) != 1) return 0; }while(0)
-static int read_model_header(FILE *fp, svm_model* model)
+static int read_model_header(FILE *fp, svm_model* model, AVFilterContext *ctx)
 {
     svm_parameter* param = &model->param;
     char cmd[81];
@@ -482,7 +486,7 @@ static int read_model_header(FILE *fp, svm_model* model)
                 }
             }
             if(svm_type_table[i] == NULL) {
-                fprintf(stderr, "unknown svm type.\n");
+                av_log(ctx, AV_LOG_ERROR, "unknown svm type.\n");
                 return 0;
             }
         } else if(av_strcasecmp(cmd, "kernel_type") == 0) {
@@ -494,7 +498,7 @@ static int read_model_header(FILE *fp, svm_model* model)
                 }
             }
             if(kernel_type_table[i] == NULL) {
-                fprintf(stderr, "unknown kernel function.\n");
+                av_log(ctx, AV_LOG_ERROR, "unknown kernel function.\n");            
                 return 0;
             }
         } else if(av_strcasecmp(cmd, "degree") == 0) {
@@ -546,7 +550,7 @@ static int read_model_header(FILE *fp, svm_model* model)
             }
             break;
         } else {
-            fprintf(stderr, "unknown text in model file: [%s]\n", cmd);
+            av_log(ctx, AV_LOG_ERROR, "unknown text in model file: [%s]\n", cmd);        
             return 0;
         }
     }
@@ -555,7 +559,7 @@ static int read_model_header(FILE *fp, svm_model* model)
 
 }
 
-static svm_model *svm_load_model(const char *model_file_name)
+static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *ctx)
 {
     FILE *fp = fopen(model_file_name, "rb");
     int i, j, k, l, m;
@@ -585,14 +589,14 @@ static svm_model *svm_load_model(const char *model_file_name)
     model->nSV = NULL;
 
     // read header
-    if (!read_model_header(fp, model)) {
-        fprintf(stderr, "ERROR: fscanf failed to read model\n");
+    if (!read_model_header(fp, model, ctx)) {
+        av_log(ctx, AV_LOG_ERROR, "ERROR: fscanf failed to read model\n");
         setlocale(LC_ALL, old_locale);
-        free(old_locale);
-        free(model->rho);
-        free(model->label);
-        free(model->nSV);
-        free(model);
+        av_free(old_locale);
+        av_free(model->rho);
+        av_free(model->label);
+        av_free(model->nSV);
+        av_free(model);
         return NULL;
     }
 
@@ -656,10 +660,10 @@ static svm_model *svm_load_model(const char *model_file_name)
         }
         x_space[j++].index = -1;
     }
-    free(line);
+    av_free(line);
 
     setlocale(LC_ALL, old_locale);
-    free(old_locale);
+    av_free(old_locale);
 
     if (ferror(fp) != 0 || fclose(fp) != 0) {
         return NULL;
@@ -673,36 +677,36 @@ static void svm_free_model_content(svm_model* model_ptr)
 {
     int i;
     if(model_ptr->free_sv && model_ptr->l > 0 && model_ptr->SV != NULL) {
-        free((void *) (model_ptr->SV[0]));
+        av_free((void *) (model_ptr->SV[0]));
     }
     if(model_ptr->sv_coef) {
         for(i = 0; i < model_ptr->nr_class - 1; i++) {
-            free(model_ptr->sv_coef[i]);
+            av_free(model_ptr->sv_coef[i]);
         }
     }
 
-    free(model_ptr->SV);
+    av_free(model_ptr->SV);
     model_ptr->SV = NULL;
 
-    free(model_ptr->sv_coef);
+    av_free(model_ptr->sv_coef);
     model_ptr->sv_coef = NULL;
 
-    free(model_ptr->rho);
+    av_free(model_ptr->rho);
     model_ptr->rho = NULL;
 
-    free(model_ptr->label);
+    av_free(model_ptr->label);
     model_ptr->label= NULL;
 
-    free(model_ptr->probA);
+    av_free(model_ptr->probA);
     model_ptr->probA = NULL;
 
-    free(model_ptr->probB);
+    av_free(model_ptr->probB);
     model_ptr->probB= NULL;
 
-    free(model_ptr->sv_indices);
+    av_free(model_ptr->sv_indices);
     model_ptr->sv_indices = NULL;
 
-    free(model_ptr->nSV);
+    av_free(model_ptr->nSV);
     model_ptr->nSV = NULL;
 }
 
@@ -710,7 +714,7 @@ static void svm_free_and_destroy_model(svm_model** model_ptr_ptr)
 {
     if(model_ptr_ptr != NULL && *model_ptr_ptr != NULL) {
         svm_free_model_content(*model_ptr_ptr);
-        free(*model_ptr_ptr);
+        av_free(*model_ptr_ptr);
         *model_ptr_ptr = NULL;
     }
 }
@@ -795,10 +799,10 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
                  &s->score_num, &s->score_den, s->scores, s->adm_data_buf,
                  s->adm_temp_lo, s->adm_temp_hi);
 
-    append_arr(&s->adm_array, (double)((s->score_num + ADM_SCALE_CONSTANT) / (s->score_den + ADM_SCALE_CONSTANT)));
+    append_arr(&s->adm_array, (double)(s->score_num / s->score_den ));
     j = 0;
     for(i = 0; j < 4; i += 2) {
-        append_arr(&s->adm_scale_array[j], (double)((s->scores[i] + ADM_SCALE_CONSTANT) / (s->scores[i+1] + ADM_SCALE_CONSTANT)));
+        append_arr(&s->adm_scale_array[j], (double)(s->scores[i] / s->scores[i+1]));
         j++;
     }
 
@@ -928,12 +932,10 @@ static int config_input_ref(AVFilterLink *inlink)
     data_sz = (size_t)stride * s->height;
 
     if (!(s->ref_data = av_malloc(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "ref data allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
     if (!(s->main_data = av_malloc(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "main data allocation failed.\n");
         return AVERROR(ENOMEM);
     }
 
@@ -1026,7 +1028,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     int i, j;
 
     if (s->nb_frames > 0) {
-        svm_model *svm_model_ptr = svm_load_model(s->model_path);
+        svm_model *svm_model_ptr = svm_load_model(s->model_path, ctx);
         svm_node* nodes = (svm_node*) av_malloc(sizeof(svm_node) * (6 + 1));
         nodes[6].index = -1;
         double prediction;
@@ -1114,9 +1116,26 @@ static av_cold void uninit(AVFilterContext *ctx)
                 /** denormalize */
                 prediction = (prediction - (double)(intercepts[0])) / (double)(slopes[0]);
             }
+            
+            /* score transform */
+            if (s->enable_transform) {
+                double value = 0.0;
 
-            pool_method(&score, prediction);
-        }
+                /* quadratic transform */
+                value += (double)(score_transform[0]);
+                value += (double)(score_transform[1]) * prediction;
+                value += (double)(score_transform[2]) * prediction * prediction;
+
+                /* rectification */
+                if (value < prediction) {
+                    value = prediction;
+                }
+
+                prediction = value;
+            }
+
+                pool_method(&score, prediction);
+            }
 
         if(!av_strcasecmp(s->pool, "mean")) {
             s->vmaf_score = score / s->nb_frames;
@@ -1151,7 +1170,6 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_free(s->temp_data);
         av_free(s->vif_data_buf);
         av_free(s->vif_temp);
-
     }
 
     ff_dualinput_uninit(&s->dinput);
