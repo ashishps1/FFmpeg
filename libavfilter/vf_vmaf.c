@@ -25,6 +25,7 @@
  */
 
 #include <locale.h>
+#include <unistd.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -66,7 +67,6 @@ typedef struct VMAFContext {
     double vmaf_score;
     uint64_t nb_frames;
     char *model_path;
-    char svm_model_path[100];
     char *log_path;
     char *log_fmt;
     int enable_transform;
@@ -84,7 +84,7 @@ typedef struct VMAFContext {
 #define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static const AVOption vmaf_options[] = {
-    {"model_path",  "Set the model to be used for computing vmaf.",                     OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="/usr/local/share/model/vmaf_v0.6.1.pkl"}, 0, 1, FLAGS},
+    {"model_path",  "Set the model to be used for computing vmaf.",                     OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="libavfilter/data/vmaf_v0.6.1.pkl.model"}, 0, 1, FLAGS},
     {"log_path",  "Set the file path to be used to store logs.",                        OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"log_fmt",  "Set the format of the log (xml or json).",                            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"enable_transform",  "Enables transform for computing vmaf.",                      OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
@@ -99,7 +99,6 @@ AVFILTER_DEFINE_CLASS(vmaf);
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 #define INIT_FRAMES 1000
-#define ADM2_CONSTANT 0.0
 #define ADM_SCALE_CONSTANT 0.0
 
 const char *norm_type = "linear_rescale";
@@ -273,7 +272,7 @@ static double dot(const svm_node *px, const svm_node *py)
 }
 
 static double k_function(const svm_node *x, const svm_node *y,
-                  const svm_parameter *param)
+                         const svm_parameter *param)
 {
     switch(param->kernel_type)
     {
@@ -471,11 +470,11 @@ static int read_model_header(FILE *fp, svm_model* model)
 {
     svm_parameter* param = &model->param;
     char cmd[81];
+    int i;
     while(1) {
         FSCANF(fp, "%80s", cmd);
 
         if(strcmp(cmd, "svm_type") == 0) {
-            int i;
             FSCANF(fp, "%80s", cmd);
             for(i = 0; svm_type_table[i]; i++) {
                 if(strcmp(svm_type_table[i], cmd) == 0) {
@@ -488,7 +487,6 @@ static int read_model_header(FILE *fp, svm_model* model)
                 return 0;
             }
         } else if(strcmp(cmd, "kernel_type") == 0) {
-            int i;
             FSCANF(fp, "%80s", cmd);
             for(i = 0; kernel_type_table[i]; i++) {
                 if(strcmp(kernel_type_table[i], cmd) == 0) {
@@ -504,7 +502,7 @@ static int read_model_header(FILE *fp, svm_model* model)
             FSCANF(fp, "%d", &param->degree);
         } else if(strcmp(cmd, "gamma") == 0) {
             FSCANF(fp, "%lf", &param->gamma);
-        } else if(strcmp(cmd,"coef0")==0) {
+        } else if(strcmp(cmd, "coef0") == 0) {
             FSCANF(fp, "%lf", &param->coef0);
         } else if(strcmp(cmd, "nr_class") == 0) {
             FSCANF(fp,"%d",&model->nr_class);
@@ -512,31 +510,32 @@ static int read_model_header(FILE *fp, svm_model* model)
             FSCANF(fp, "%d", &model->l);
         } else if(strcmp(cmd, "rho")==0) {
             int n = model->nr_class * (model->nr_class-1)/2;
-            model->rho = Malloc(double,n);
-            for(int i=0;i<n;i++)
-                FSCANF(fp,"%lf",&model->rho[i]);
+            model->rho = Malloc(double, n);
+            for(i = 0; i < n; i++) {
+                FSCANF(fp, "%lf", &model->rho[i]);
+            }
         } else if(strcmp(cmd, "label") == 0) {
             int n = model->nr_class;
-            model->label = Malloc(int,n);
-            for(int i = 0;i < n; i++) {
-                FSCANF(fp,"%d",&model->label[i]);
+            model->label = Malloc(int, n);
+            for(i = 0; i < n; i++) {
+                FSCANF(fp, "%d", &model->label[i]);
             }
-        } else if(strcmp(cmd,"probA") == 0) {
-            int n = model->nr_class * (model->nr_class-1)/2;
-            model->probA = Malloc(double,n);
-            for(int i=0;i<n;i++) {
-                FSCANF(fp,"%lf",&model->probA[i]);
+        } else if(strcmp(cmd, "probA") == 0) {
+            int n = model->nr_class * (model->nr_class - 1) / 2;
+            model->probA = Malloc(double, n);
+            for(i = 0;i < n; i++) {
+                FSCANF(fp, "%lf", &model->probA[i]);
             }
         } else if(strcmp(cmd, "probB") == 0) {
-            int n = model->nr_class * (model->nr_class-1)/2;
+            int n = model->nr_class * (model->nr_class - 1) / 2;
             model->probB = Malloc(double,n);
-            for(int i = 0; i < n; i++) {
+            for(i = 0; i < n; i++) {
                 FSCANF(fp, "%lf", &model->probB[i]);
             }
         } else if(strcmp(cmd, "nr_sv") == 0) {
             int n = model->nr_class;
-            model->nSV = Malloc(int,n);
-            for(int i = 0; i < n; i++) {
+            model->nSV = Malloc(int, n);
+            for(i = 0; i < n; i++) {
                 FSCANF(fp, "%d", &model->nSV[i]);
             }
         } else if(strcmp(cmd, "SV") == 0) {
@@ -564,11 +563,11 @@ static svm_model *svm_load_model(const char *model_file_name)
     char *p,*endptr,*idx,*val;
     char *old_locale;
     svm_model *model;
-    
+
     int elements;
     long pos;
     svm_node *x_space;
-    
+
     if(fp == NULL) {
         return NULL;
     }
@@ -597,7 +596,7 @@ static svm_model *svm_load_model(const char *model_file_name)
         free(model);
         return NULL;
     }
-    
+
     // read sv_coef and SV
 
     elements = 0;
@@ -651,7 +650,7 @@ static svm_model *svm_load_model(const char *model_file_name)
             if(val == NULL) {
                 break;
             }
-            x_space[j].index = (int) strtol(idx, &endptr,10);
+            x_space[j].index = (int) strtol(idx, &endptr, 10);
             x_space[j].value = strtod(val, &endptr);
 
             j++;
@@ -776,7 +775,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     ptrdiff_t motion_px_stride;
     int w = s->width;
     int h = s->height;
-    
+
     ref_stride = ref->linesize[0];
 
     stride = ALIGN_CEIL(w * sizeof(float));
@@ -820,7 +819,7 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
         s->score = 0.0;
     } else {
         compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
-                        motion_stride, motion_stride, &s->score);
+                           motion_stride, motion_stride, &s->score);
     }
 
     memcpy(s->prev_blur_data, s->blur_data, data_sz);
@@ -832,10 +831,10 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     }
 
     s->prev_motion_score = s->score;
-    
+
     compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->vif_data_buf, s->vif_temp);
-    
+
     j = 0;
     for(i = 0; j < 4; i += 2) {
         append_arr(&s->vif_scale_array[j], (double)((s->scores[i]) / (s->scores[i+1])));
@@ -863,8 +862,6 @@ static av_cold int init(AVFilterContext *ctx)
 
     if(!s->called) {
         int i,j;
-        sprintf(s->svm_model_path, "%s.model", s->model_path);
-
         for(i = 0; i < 5; i++) {
             s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
         }    
@@ -1037,7 +1034,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     int i, j;
 
     if (s->nb_frames > 0) {
-        svm_model *svm_model_ptr = svm_load_model(s->svm_model_path);
+        svm_model *svm_model_ptr = svm_load_model(s->model_path);
         svm_node* nodes = (svm_node*) av_malloc(sizeof(svm_node) * (6 + 1));
         nodes[6].index = -1;
         double prediction;
