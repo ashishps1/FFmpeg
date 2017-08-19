@@ -25,7 +25,6 @@
  */
 
 #include <locale.h>
-#include <unistd.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -52,7 +51,6 @@ typedef struct VMAFContext {
     double score_num;
     double score_den;
     int conv_filter[5];
-    int vif_filter[4][17];
     float *ref_data;
     float *main_data;
     float *adm_data_buf;
@@ -379,10 +377,12 @@ static double svm_predict_values(const svm_model *model, const svm_node *x, doub
                 int k;
                 double *coef1 = model->sv_coef[j - 1];
                 double *coef2 = model->sv_coef[i];
-                for(k = 0; k < ci; k++)
+                for(k = 0; k < ci; k++) {
                     sum += coef1[si + k] * kvalue[si + k];
-                for(k = 0; k < cj; k++)
+                }
+                for(k = 0; k < cj; k++) {
                     sum += coef2[sj + k] * kvalue[sj + k];
+                }
                 sum -= model->rho[p];
                 dec_values[p] = sum;
 
@@ -447,7 +447,7 @@ static char* readline(FILE *input)
         return NULL;
     }
 
-    while(strrchr(line,'\n') == NULL) {
+    while(strrchr(line, '\n') == NULL) {
         max_line_len *= 2;
         line = (char *) realloc(line,max_line_len);
         len = (int) strlen(line);
@@ -458,13 +458,12 @@ static char* readline(FILE *input)
     return line;
 }
 
-//
-// FSCANF helps to handle fscanf failures.
-// Its do-while block avoids the ambiguity when
-// if (...)
-//    FSCANF();
-// is used
-//
+/** FSCANF helps to handle fscanf failures.
+ * Its do-while block avoids the ambiguity when
+ * if (...)
+ *    FSCANF();
+ * is used
+ */
 #define FSCANF(_stream, _format, _var) do{ if (fscanf(_stream, _format, _var) != 1) return 0; }while(0)
 static int read_model_header(FILE *fp, svm_model* model)
 {
@@ -474,10 +473,10 @@ static int read_model_header(FILE *fp, svm_model* model)
     while(1) {
         FSCANF(fp, "%80s", cmd);
 
-        if(strcmp(cmd, "svm_type") == 0) {
+        if(av_strcasecmp(cmd, "svm_type") == 0) {
             FSCANF(fp, "%80s", cmd);
             for(i = 0; svm_type_table[i]; i++) {
-                if(strcmp(svm_type_table[i], cmd) == 0) {
+                if(av_strcasecmp(svm_type_table[i], cmd) == 0) {
                     param->svm_type = i;
                     break;
                 }
@@ -486,59 +485,59 @@ static int read_model_header(FILE *fp, svm_model* model)
                 fprintf(stderr, "unknown svm type.\n");
                 return 0;
             }
-        } else if(strcmp(cmd, "kernel_type") == 0) {
+        } else if(av_strcasecmp(cmd, "kernel_type") == 0) {
             FSCANF(fp, "%80s", cmd);
             for(i = 0; kernel_type_table[i]; i++) {
-                if(strcmp(kernel_type_table[i], cmd) == 0) {
-                    param->kernel_type=i;
+                if(av_strcasecmp(kernel_type_table[i], cmd) == 0) {
+                    param->kernel_type = i;
                     break;
                 }
             }
             if(kernel_type_table[i] == NULL) {
-                fprintf(stderr,"unknown kernel function.\n");
+                fprintf(stderr, "unknown kernel function.\n");
                 return 0;
             }
-        } else if(strcmp(cmd, "degree") == 0) {
+        } else if(av_strcasecmp(cmd, "degree") == 0) {
             FSCANF(fp, "%d", &param->degree);
-        } else if(strcmp(cmd, "gamma") == 0) {
+        } else if(av_strcasecmp(cmd, "gamma") == 0) {
             FSCANF(fp, "%lf", &param->gamma);
-        } else if(strcmp(cmd, "coef0") == 0) {
+        } else if(av_strcasecmp(cmd, "coef0") == 0) {
             FSCANF(fp, "%lf", &param->coef0);
-        } else if(strcmp(cmd, "nr_class") == 0) {
+        } else if(av_strcasecmp(cmd, "nr_class") == 0) {
             FSCANF(fp,"%d",&model->nr_class);
-        } else if(strcmp(cmd, "total_sv") == 0) {
+        } else if(av_strcasecmp(cmd, "total_sv") == 0) {
             FSCANF(fp, "%d", &model->l);
-        } else if(strcmp(cmd, "rho")==0) {
-            int n = model->nr_class * (model->nr_class-1)/2;
+        } else if(av_strcasecmp(cmd, "rho")==0) {
+            int n = model->nr_class * (model->nr_class-1) / 2;
             model->rho = Malloc(double, n);
             for(i = 0; i < n; i++) {
                 FSCANF(fp, "%lf", &model->rho[i]);
             }
-        } else if(strcmp(cmd, "label") == 0) {
+        } else if(av_strcasecmp(cmd, "label") == 0) {
             int n = model->nr_class;
             model->label = Malloc(int, n);
             for(i = 0; i < n; i++) {
                 FSCANF(fp, "%d", &model->label[i]);
             }
-        } else if(strcmp(cmd, "probA") == 0) {
+        } else if(av_strcasecmp(cmd, "probA") == 0) {
             int n = model->nr_class * (model->nr_class - 1) / 2;
             model->probA = Malloc(double, n);
             for(i = 0;i < n; i++) {
                 FSCANF(fp, "%lf", &model->probA[i]);
             }
-        } else if(strcmp(cmd, "probB") == 0) {
+        } else if(av_strcasecmp(cmd, "probB") == 0) {
             int n = model->nr_class * (model->nr_class - 1) / 2;
             model->probB = Malloc(double,n);
             for(i = 0; i < n; i++) {
                 FSCANF(fp, "%lf", &model->probB[i]);
             }
-        } else if(strcmp(cmd, "nr_sv") == 0) {
+        } else if(av_strcasecmp(cmd, "nr_sv") == 0) {
             int n = model->nr_class;
             model->nSV = Malloc(int, n);
             for(i = 0; i < n; i++) {
                 FSCANF(fp, "%d", &model->nSV[i]);
             }
-        } else if(strcmp(cmd, "SV") == 0) {
+        } else if(av_strcasecmp(cmd, "SV") == 0) {
             while(1) {
                 int c = getc(fp);
                 if(c == EOF || c == '\n') {
@@ -560,7 +559,7 @@ static svm_model *svm_load_model(const char *model_file_name)
 {
     FILE *fp = fopen(model_file_name, "rb");
     int i, j, k, l, m;
-    char *p,*endptr,*idx,*val;
+    char *p, *endptr, *idx, *val;
     char *old_locale;
     svm_model *model;
 
@@ -603,9 +602,9 @@ static svm_model *svm_load_model(const char *model_file_name)
     pos = ftell(fp);
 
     max_line_len = 1024;
-    line = Malloc(char,max_line_len);
+    line = Malloc(char, max_line_len);
 
-    while(readline(fp)!=NULL) {
+    while(readline(fp) != NULL) {
         p = strtok(line, ":");
         while(1) {
             p = strtok(NULL, ":");
@@ -617,7 +616,7 @@ static svm_model *svm_load_model(const char *model_file_name)
     }
     elements += model->l;
 
-    fseek(fp,pos,SEEK_SET);
+    fseek(fp, pos, SEEK_SET);
 
     m = model->nr_class - 1;
     l = model->l;
@@ -625,10 +624,10 @@ static svm_model *svm_load_model(const char *model_file_name)
     for(i = 0; i < m; i++) {
         model->sv_coef[i] = Malloc(double,l);
     }
-    model->SV = Malloc(svm_node*,l);
+    model->SV = Malloc(svm_node*, l);
     x_space = NULL;
     if(l > 0) {
-        x_space = Malloc(svm_node,elements);
+        x_space = Malloc(svm_node, elements);
     }
 
     j=0;
@@ -833,7 +832,8 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     s->prev_motion_score = s->score;
 
     compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
-                 &s->score_num, &s->score_den, s->scores, s->vif_data_buf, s->vif_temp);
+                 &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
+                 s->vif_temp);
 
     j = 0;
     for(i = 0; j < 4; i += 2) {
@@ -861,16 +861,10 @@ static av_cold int init(AVFilterContext *ctx)
     VMAFContext *s = ctx->priv;
 
     if(!s->called) {
-        int i,j;
+        int i;
         for(i = 0; i < 5; i++) {
             s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
-        }    
-
-        for(i = 0; i < 4; i++) {
-            for(j = 0; j < vif_filter_width[i]; j++){
-                s->vif_filter[i][j] = lrint(vif_filter_table[i][j] * (1 << N));
-            }
-        }    
+        }
 
         init_arr(&s->adm_array, INIT_FRAMES);
         for(i = 0; i < 4; i++) {
@@ -985,13 +979,11 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(EINVAL);
     }
 
-    if (!(s->vif_data_buf = av_malloc(vif_buf_sz * 16)))
-    {
+    if (!(s->vif_data_buf = av_malloc(vif_buf_sz * 16))) {
         return AVERROR(ENOMEM);
     }
 
-    if (!(s->vif_temp = av_malloc(s->width * sizeof(float))))
-    {
+    if (!(s->vif_temp = av_malloc(s->width * sizeof(float)))) {
         return AVERROR(ENOMEM);
     }
 
@@ -1054,31 +1046,31 @@ static av_cold void uninit(AVFilterContext *ctx)
             if (!av_strcasecmp(norm_type, "linear_rescale")) {
                 for (j = 0; j < 6; j++) {
                     nodes[j].index = j + 1;
-                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score"))
+                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_array, i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[0], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[1], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[2], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[3], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->motion_array, i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[0], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[1], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[2], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[3], i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_array, i) + (double)(intercepts[j + 1]);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score")) {
                         nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->motion2_array, i) + (double)(intercepts[j + 1]);
-                    else {
+                    } else {
                         av_log(ctx, AV_LOG_ERROR, "Unknown feature name: %s.\n", feature_names[j]);
                     }
                 }
@@ -1086,31 +1078,31 @@ static av_cold void uninit(AVFilterContext *ctx)
             else {
                 for (j = 0; j < 6; j++) {
                     nodes[j].index = j + 1;
-                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score"))
+                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score")) {
                         nodes[j].value = get_at_pos(&s->adm_array, i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score")) {
                         nodes[j].value = get_at_pos(&s->adm_scale_array[0], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score")) {
                         nodes[j].value = get_at_pos(&s->adm_scale_array[1], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score")) {
                         nodes[j].value = get_at_pos(&s->adm_scale_array[2], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score")) {
                         nodes[j].value = get_at_pos(&s->adm_scale_array[3], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score")) {
                         nodes[j].value = get_at_pos(&s->motion_array, i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score")) {
                         nodes[j].value = get_at_pos(&s->vif_scale_array[0], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score")) {
                         nodes[j].value = get_at_pos(&s->vif_scale_array[1], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score")) {
                         nodes[j].value = get_at_pos(&s->vif_scale_array[2], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score")) {
                         nodes[j].value = get_at_pos(&s->vif_scale_array[3], i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score")) {
                         nodes[j].value = get_at_pos(&s->vif_array, i);
-                    else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score"))
+                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score")) {
                         nodes[j].value = get_at_pos(&s->motion2_array, i);
-                    else {
+                    } else {
                         av_log(ctx, AV_LOG_ERROR, "Unknown feature name: %s.\n", feature_names[j]);
                     }
                 }
@@ -1135,6 +1127,8 @@ static av_cold void uninit(AVFilterContext *ctx)
         }
 
         av_log(ctx, AV_LOG_INFO, "VMAF Score: %.3f\n", s->vmaf_score);
+
+        svm_free_and_destroy_model((svm_model **)&svm_model_ptr);
 
         free_arr(&s->adm_array);
         for(i = 0; i < 4; i++) {
