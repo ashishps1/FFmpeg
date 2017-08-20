@@ -24,7 +24,6 @@
  * Calculate the VMAF between two input videos.
  */
 
-#include <locale.h>
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -276,14 +275,12 @@ static double dot(const svm_node *px, const svm_node *py)
 static double k_function(const svm_node *x, const svm_node *y,
                          const svm_parameter *param)
 {
-    switch(param->kernel_type)
-    {
+    switch(param->kernel_type) {
         case LINEAR:
             return dot(x, y);
         case POLY:
             return power(param->gamma * dot(x, y) + param->coef0, param->degree);
-        case RBF:
-            {
+        case RBF: {
                 double sum = 0;
                 while(x->index != -1 && y->index !=-1) {
                     if(x->index == y->index) {
@@ -498,7 +495,7 @@ static int read_model_header(FILE *fp, svm_model* model, AVFilterContext *ctx)
                 }
             }
             if(kernel_type_table[i] == NULL) {
-                av_log(ctx, AV_LOG_ERROR, "unknown kernel function.\n");            
+                av_log(ctx, AV_LOG_ERROR, "unknown kernel function.\n");
                 return 0;
             }
         } else if(av_strcasecmp(cmd, "degree") == 0) {
@@ -550,7 +547,7 @@ static int read_model_header(FILE *fp, svm_model* model, AVFilterContext *ctx)
             }
             break;
         } else {
-            av_log(ctx, AV_LOG_ERROR, "unknown text in model file: [%s]\n", cmd);        
+            av_log(ctx, AV_LOG_ERROR, "unknown text in model file: [%s]\n", cmd);
             return 0;
         }
     }
@@ -564,7 +561,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
     FILE *fp = fopen(model_file_name, "rb");
     int i, j, k, l, m;
     char *p, *endptr, *idx, *val;
-    char *old_locale;
     svm_model *model;
 
     int elements;
@@ -575,11 +571,7 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         return NULL;
     }
 
-    old_locale = strdup(setlocale(LC_ALL, NULL));
-    setlocale(LC_ALL, "C");
-
     // read parameters
-
     model = Malloc(svm_model,1);
     model->rho = NULL;
     model->probA = NULL;
@@ -591,8 +583,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
     // read header
     if (!read_model_header(fp, model, ctx)) {
         av_log(ctx, AV_LOG_ERROR, "ERROR: fscanf failed to read model\n");
-        setlocale(LC_ALL, old_locale);
-        av_free(old_locale);
         av_free(model->rho);
         av_free(model->label);
         av_free(model->nSV);
@@ -601,7 +591,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
     }
 
     // read sv_coef and SV
-
     elements = 0;
     pos = ftell(fp);
 
@@ -661,9 +650,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         x_space[j++].index = -1;
     }
     av_free(line);
-
-    setlocale(LC_ALL, old_locale);
-    av_free(old_locale);
 
     if (ferror(fp) != 0 || fclose(fp) != 0) {
         return NULL;
@@ -1116,7 +1102,7 @@ static av_cold void uninit(AVFilterContext *ctx)
                 /** denormalize */
                 prediction = (prediction - (double)(intercepts[0])) / (double)(slopes[0]);
             }
-            
+
             /* score transform */
             if (s->enable_transform) {
                 double value = 0.0;
