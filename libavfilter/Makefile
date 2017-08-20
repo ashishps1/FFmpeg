@@ -126,7 +126,7 @@ OBJS-$(CONFIG_SINE_FILTER)                   += asrc_sine.o
 OBJS-$(CONFIG_ANULLSINK_FILTER)              += asink_anullsink.o
 
 # video filters
-OBJS-$(CONFIG_ADM_FILTER)                    += vf_adm.o dualinput.o framesync.o
+OBJS-$(CONFIG_ADM_FILTER)                    += vf_adm.o framesync2.o
 OBJS-$(CONFIG_ALPHAEXTRACT_FILTER)           += vf_extractplanes.o
 OBJS-$(CONFIG_ALPHAMERGE_FILTER)             += vf_alphamerge.o
 OBJS-$(CONFIG_ASS_FILTER)                    += vf_subtitles.o
@@ -322,10 +322,10 @@ OBJS-$(CONFIG_VECTORSCOPE_FILTER)            += vf_vectorscope.o
 OBJS-$(CONFIG_VFLIP_FILTER)                  += vf_vflip.o
 OBJS-$(CONFIG_VIDSTABDETECT_FILTER)          += vidstabutils.o vf_vidstabdetect.o
 OBJS-$(CONFIG_VIDSTABTRANSFORM_FILTER)       += vidstabutils.o vf_vidstabtransform.o
-OBJS-$(CONFIG_VIF_FILTER)                    += vf_vif.o dualinput.o framesync.o
+OBJS-$(CONFIG_VIF_FILTER)                    += vf_vif.o framesync2.o
 OBJS-$(CONFIG_VIGNETTE_FILTER)               += vf_vignette.o
-OBJS-$(CONFIG_VMAF_FILTER)                   += vf_vmaf.o dualinput.o framesync.o
-OBJS-$(CONFIG_VMAFMOTION_FILTER)             += vf_vmafmotion.o dualinput.o framesync.o
+OBJS-$(CONFIG_VMAF_FILTER)                   += vf_vmaf.o framesync2.o
+OBJS-$(CONFIG_VMAFMOTION_FILTER)             += vf_vmafmotion.o framesync2.o
 OBJS-$(CONFIG_VSTACK_FILTER)                 += vf_stack.o framesync.o
 OBJS-$(CONFIG_W3FDIF_FILTER)                 += vf_w3fdif.o
 OBJS-$(CONFIG_WAVEFORM_FILTER)               += vf_waveform.o

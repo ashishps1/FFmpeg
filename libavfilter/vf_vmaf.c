@@ -28,9 +28,9 @@
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "dualinput.h"
 #include "drawutils.h"
 #include "formats.h"
+#include "framesync2.h"
 #include "internal.h"
 #include "video.h"
 #include "adm.h"
@@ -40,7 +40,7 @@
 
 typedef struct VMAFContext {
     const AVClass *class;
-    FFDualInputContext dinput;
+    FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
     int width;
     int height;
@@ -90,7 +90,7 @@ static const AVOption vmaf_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(vmaf);
+FRAMESYNC_DEFINE_CLASS(vmaf, VMAFContext, fs);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
@@ -835,15 +835,25 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     return 0;
 }
 
-static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static int do_psnr(FFFrameSync *fs)
 {
+    AVFilterContext *ctx = fs->parent;
     VMAFContext *s = ctx->priv;
+    AVFrame *main, *ref;
+    int ret, j, c;
+    AVDictionary **metadata;
 
+    ret = ff_framesync2_dualinput_get(fs, &main, &ref);
+    if (ret < 0)
+            return ret;
+    if (!ref)
+            return ff_filter_frame(ctx->outputs[0], main);
+    metadata = &main->metadata;
     compute_vmaf(ref, main, s);
 
     s->nb_frames++;
 
-    return main;
+    return ff_filter_frame(ctx->outputs[0], main);
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -869,7 +879,7 @@ static av_cold int init(AVFilterContext *ctx)
     }
 
     s->called = 1;
-    s->dinput.process = do_vmaf;
+    s->fs.on_event = do_vmaf;
 
     return 0;
 }
@@ -984,28 +994,24 @@ static int config_output(AVFilterLink *outlink)
     VMAFContext *s = ctx->priv;
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
-
+    ret = ff_framesync2_init_dualinput(&s->fs, ctx);
+    if (ret < 0)
+            return ret;
     outlink->w = mainlink->w;
     outlink->h = mainlink->h;
     outlink->time_base = mainlink->time_base;
     outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
     outlink->frame_rate = mainlink->frame_rate;
-    if ((ret = ff_dualinput_init(ctx, &s->dinput)) < 0)
+    if ((ret = ff_framesync2_configure(&s->fs)) < 0)
         return ret;
 
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
+static int activate(AVFilterContext *ctx)
 {
-    VMAFContext *s = inlink->dst->priv;
-    return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
-}
-
-static int request_frame(AVFilterLink *outlink)
-{
-    VMAFContext *s = outlink->src->priv;
-    return ff_dualinput_request_frame(&s->dinput, outlink);
+    VMAFContext *s = ctx->priv;
+    return ff_framesync2_activate(&s->fs);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
@@ -1158,7 +1164,7 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_free(s->vif_temp);
     }
 
-    ff_dualinput_uninit(&s->dinput);
+    ff_framesync2_uninit(&s->fs);
 }
 
 static const AVFilterPad vmaf_inputs[] = {
@@ -1169,7 +1175,6 @@ static const AVFilterPad vmaf_inputs[] = {
     },{
         .name         = "reference",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
         .config_props = config_input_ref,
     },
     { NULL }
@@ -1180,7 +1185,6 @@ static const AVFilterPad vmaf_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_output,
-        .request_frame = request_frame,
     },
     { NULL }
 };
@@ -1188,9 +1192,11 @@ static const AVFilterPad vmaf_outputs[] = {
 AVFilter ff_vf_vmaf = {
     .name          = "vmaf",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two video streams."),
+    .preinit       = vmaf_framesync_preinit,
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
+    .activate      = activate,
     .priv_size     = sizeof(VMAFContext),
     .priv_class    = &vmaf_class,
     .inputs        = vmaf_inputs,
