@@ -3943,8 +3943,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
             if (!st->r_frame_rate.num) {
                 if (    avctx->time_base.den * (int64_t) st->time_base.num
                     <= avctx->time_base.num * avctx->ticks_per_frame * (int64_t) st->time_base.den) {
-                    st->r_frame_rate.num = avctx->time_base.den;
-                    st->r_frame_rate.den = avctx->time_base.num * avctx->ticks_per_frame;
+                    av_reduce(&st->r_frame_rate.num, &st->r_frame_rate.den,
+                              avctx->time_base.den, (int64_t)avctx->time_base.num * avctx->ticks_per_frame, INT_MAX);
                 } else {
                     st->r_frame_rate.num = st->time_base.den;
                     st->r_frame_rate.den = st->time_base.num;
@@ -4333,8 +4333,8 @@ void avformat_free_context(AVFormatContext *s)
     av_dict_free(&s->metadata);
     av_dict_free(&s->internal->id3v2_meta);
     av_freep(&s->streams);
-    av_freep(&s->internal);
     flush_packet_queue(s);
+    av_freep(&s->internal);
     av_free(s);
 }
 

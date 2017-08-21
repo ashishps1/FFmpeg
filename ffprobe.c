@@ -2105,6 +2105,31 @@ static void show_frame(WriterContext *w, AVFrame *frame, AVStream *stream,
         print_int("interlaced_frame",       frame->interlaced_frame);
         print_int("top_field_first",        frame->top_field_first);
         print_int("repeat_pict",            frame->repeat_pict);
+
+        if (frame->color_range != AVCOL_RANGE_UNSPECIFIED)
+            print_str("color_range", av_color_range_name(frame->color_range));
+        else
+            print_str_opt("color_range", av_color_range_name(frame->color_range));
+
+        if (frame->colorspace != AVCOL_SPC_UNSPECIFIED)
+            print_str("color_space", av_color_space_name(frame->colorspace));
+        else
+            print_str_opt("color_space", av_color_space_name(frame->colorspace));
+
+        if (frame->color_primaries != AVCOL_PRI_UNSPECIFIED)
+            print_str("color_primaries", av_color_primaries_name(frame->color_primaries));
+        else
+            print_str_opt("color_primaries", av_color_primaries_name(frame->color_primaries));
+
+        if (frame->color_trc != AVCOL_TRC_UNSPECIFIED)
+            print_str("color_transfer", av_color_transfer_name(frame->color_trc));
+        else
+            print_str_opt("color_transfer", av_color_transfer_name(frame->color_trc));
+
+        if (frame->chroma_location != AVCHROMA_LOC_UNSPECIFIED)
+            print_str("chroma_location", av_chroma_location_name(frame->chroma_location));
+        else
+            print_str_opt("chroma_location", av_chroma_location_name(frame->chroma_location));
         break;
 
     case AVMEDIA_TYPE_AUDIO:
@@ -2165,6 +2190,11 @@ static void show_frame(WriterContext *w, AVFrame *frame, AVStream *stream,
                 AVContentLightMetadata *metadata = (AVContentLightMetadata *)sd->data;
                 print_int("max_content", metadata->MaxCLL);
                 print_int("max_average", metadata->MaxFALL);
+            } else if (sd->type == AV_FRAME_DATA_ICC_PROFILE) {
+                AVDictionaryEntry *tag = av_dict_get(sd->metadata, "name", NULL, AV_DICT_MATCH_CASE);
+                if (tag)
+                    print_str(tag->key, tag->value);
+                print_int("size", sd->size);
             }
             writer_print_section_footer(w);
         }
@@ -3298,6 +3328,7 @@ static int parse_read_interval(const char *interval_spec,
             }
             interval->end = lli;
         } else {
+            interval->duration_frames = 0;
             ret = av_parse_time(&us, p, 1);
             if (ret < 0) {
                 av_log(NULL, AV_LOG_ERROR, "Invalid interval end/duration specification '%s'\n", p);

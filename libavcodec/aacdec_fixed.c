@@ -305,8 +305,12 @@ static av_always_inline void predict(PredictorState *ps, int *coef,
     if (output_enable) {
         int shift = 28 - pv.exp;
 
-        if (shift < 31)
-            *coef += (pv.mant + (1 << (shift - 1))) >> shift;
+        if (shift < 31) {
+            if (shift > 0) {
+                *coef += (pv.mant + (1 << (shift - 1))) >> shift;
+            } else
+                *coef += pv.mant << -shift;
+        }
     }
 
     e0 = av_int2sf(*coef, 2);
@@ -432,7 +436,7 @@ static void apply_independent_coupling_fixed(AACContext *ac,
     else {
       for (i = 0; i < len; i++) {
           tmp = (int)(((int64_t)src[i] * c + (int64_t)0x1000000000) >> 37);
-          dest[i] += tmp << shift;
+          dest[i] += tmp * (1 << shift);
       }
     }
 }

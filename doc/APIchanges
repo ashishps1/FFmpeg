@@ -15,6 +15,18 @@ libavutil:     2015-08-28
 
 API changes, most recent first:
 
+2017-08-08 - xxxxxxx - lavu 55.74.100 - pixdesc.h
+  Add AV_PIX_FMT_FLAG_FLOAT pixel format flag.
+
+2017-08-08 - xxxxxxx - lavu 55.72.100 - imgutils.h
+  Add av_image_fill_black().
+
+2017-08-08 - xxxxxxx - lavu 55.71.100 - frame.h
+  Add av_frame_apply_cropping().
+
+2017-07-25 - 24de4fddca - lavu 55.69.100 - frame.h
+  Add AV_FRAME_DATA_ICC_PROFILE side data type.
+
 2017-xx-xx - xxxxxxx - lavc 57.100.100 - avcodec.h
   DXVA2 and D3D11 hardware accelerated decoding now supports the new hwaccel API,
   which can create the decoder context and allocate hardware frame automatically.

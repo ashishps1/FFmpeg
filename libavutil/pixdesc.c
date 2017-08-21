@@ -560,6 +560,27 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_RGB,
     },
+    [AV_PIX_FMT_GRAY9BE] = {
+        .name = "gray9be",
+        .nb_components = 1,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 2, 0, 0, 9, 1, 8, 1 },       /* Y */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE,
+        .alias = "y9be",
+    },
+    [AV_PIX_FMT_GRAY9LE] = {
+        .name = "gray9le",
+        .nb_components = 1,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 2, 0, 0, 9, 1, 8, 1 },       /* Y */
+        },
+        .alias = "y9le",
+    },
     [AV_PIX_FMT_GRAY10BE] = {
         .name = "gray10be",
         .nb_components = 1,
@@ -2162,6 +2183,60 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .name = "d3d11",
         .flags = AV_PIX_FMT_FLAG_HWACCEL,
     },
+    [AV_PIX_FMT_GBRPF32BE] = {
+        .name = "gbrpf32be",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 2, 4, 0, 0, 32, 3, 31, 1 },        /* R */
+            { 0, 4, 0, 0, 32, 3, 31, 1 },        /* G */
+            { 1, 4, 0, 0, 32, 3, 31, 1 },        /* B */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR |
+                 AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT,
+    },
+    [AV_PIX_FMT_GBRPF32LE] = {
+        .name = "gbrpf32le",
+        .nb_components = 3,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 2, 4, 0, 0, 32, 3, 31, 1 },        /* R */
+            { 0, 4, 0, 0, 32, 3, 31, 1 },        /* G */
+            { 1, 4, 0, 0, 32, 3, 31, 1 },        /* B */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_FLOAT | AV_PIX_FMT_FLAG_RGB,
+    },
+    [AV_PIX_FMT_GBRAPF32BE] = {
+        .name = "gbrapf32be",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 2, 4, 0, 0, 32, 3, 31, 1 },        /* R */
+            { 0, 4, 0, 0, 32, 3, 31, 1 },        /* G */
+            { 1, 4, 0, 0, 32, 3, 31, 1 },        /* B */
+            { 3, 4, 0, 0, 32, 3, 31, 1 },        /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE | AV_PIX_FMT_FLAG_PLANAR |
+                 AV_PIX_FMT_FLAG_ALPHA | AV_PIX_FMT_FLAG_RGB |
+                 AV_PIX_FMT_FLAG_FLOAT,
+    },
+    [AV_PIX_FMT_GBRAPF32LE] = {
+        .name = "gbrapf32le",
+        .nb_components = 4,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 2, 4, 0, 0, 32, 3, 31, 1 },        /* R */
+            { 0, 4, 0, 0, 32, 3, 31, 1 },        /* G */
+            { 1, 4, 0, 0, 32, 3, 31, 1 },        /* B */
+            { 3, 4, 0, 0, 32, 3, 31, 1 },        /* A */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_ALPHA |
+                 AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT,
+    },
 };
 #if FF_API_PLUS1_MINUS1
 FF_ENABLE_DEPRECATION_WARNINGS
@@ -2225,6 +2300,9 @@ static const char *color_space_names[] = {
     [AVCOL_SPC_BT2020_NCL] = "bt2020nc",
     [AVCOL_SPC_BT2020_CL] = "bt2020c",
     [AVCOL_SPC_SMPTE2085] = "smpte2085",
+    [AVCOL_SPC_CHROMA_DERIVED_NCL] = "chroma-derived-nc",
+    [AVCOL_SPC_CHROMA_DERIVED_CL] = "chroma-derived-c",
+    [AVCOL_SPC_ICTCP] = "ictcp",
 };
 
 static const char *chroma_location_names[] = {
@@ -2633,21 +2711,27 @@ enum AVPixelFormat av_find_best_pix_fmt_of_2(enum AVPixelFormat dst_pix_fmt1, en
     const AVPixFmtDescriptor *desc2 = av_pix_fmt_desc_get(dst_pix_fmt2);
     int score1, score2;
 
-    loss_mask= loss_ptr?~*loss_ptr:~0; /* use loss mask if provided */
-    if(!has_alpha)
-        loss_mask &= ~FF_LOSS_ALPHA;
-
-    score1 = get_pix_fmt_score(dst_pix_fmt1, src_pix_fmt, &loss1, loss_mask);
-    score2 = get_pix_fmt_score(dst_pix_fmt2, src_pix_fmt, &loss2, loss_mask);
-
-    if (score1 == score2) {
-        if(av_get_padded_bits_per_pixel(desc2) != av_get_padded_bits_per_pixel(desc1)) {
-            dst_pix_fmt = av_get_padded_bits_per_pixel(desc2) < av_get_padded_bits_per_pixel(desc1) ? dst_pix_fmt2 : dst_pix_fmt1;
-        } else {
-            dst_pix_fmt = desc2->nb_components < desc1->nb_components ? dst_pix_fmt2 : dst_pix_fmt1;
-        }
+    if (!desc1) {
+        dst_pix_fmt = dst_pix_fmt2;
+    } else if (!desc2) {
+        dst_pix_fmt = dst_pix_fmt1;
     } else {
-        dst_pix_fmt = score1 < score2 ? dst_pix_fmt2 : dst_pix_fmt1;
+        loss_mask= loss_ptr?~*loss_ptr:~0; /* use loss mask if provided */
+        if(!has_alpha)
+            loss_mask &= ~FF_LOSS_ALPHA;
+
+        score1 = get_pix_fmt_score(dst_pix_fmt1, src_pix_fmt, &loss1, loss_mask);
+        score2 = get_pix_fmt_score(dst_pix_fmt2, src_pix_fmt, &loss2, loss_mask);
+
+        if (score1 == score2) {
+            if(av_get_padded_bits_per_pixel(desc2) != av_get_padded_bits_per_pixel(desc1)) {
+                dst_pix_fmt = av_get_padded_bits_per_pixel(desc2) < av_get_padded_bits_per_pixel(desc1) ? dst_pix_fmt2 : dst_pix_fmt1;
+            } else {
+                dst_pix_fmt = desc2->nb_components < desc1->nb_components ? dst_pix_fmt2 : dst_pix_fmt1;
+            }
+        } else {
+            dst_pix_fmt = score1 < score2 ? dst_pix_fmt2 : dst_pix_fmt1;
+        }
     }
 
     if (loss_ptr)

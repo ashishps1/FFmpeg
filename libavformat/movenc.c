@@ -2060,6 +2060,18 @@ static int mov_write_tmcd_tag(AVIOContext *pb, MOVTrack *track)
     return update_size(pb, pos);
 }
 
+static int mov_write_gpmd_tag(AVIOContext *pb, const MOVTrack *track)
+{
+    int64_t pos = avio_tell(pb);
+    avio_wb32(pb, 0); /* size */
+    ffio_wfourcc(pb, "gpmd");
+    avio_wb32(pb, 0); /* Reserved */
+    avio_wb16(pb, 0); /* Reserved */
+    avio_wb16(pb, 1); /* Data-reference index */
+    avio_wb32(pb, 0); /* Reserved */
+    return update_size(pb, pos);
+}
+
 static int mov_write_stsd_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext *mov, MOVTrack *track)
 {
     int64_t pos = avio_tell(pb);
@@ -2077,6 +2089,8 @@ static int mov_write_stsd_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext
         mov_write_rtp_tag(pb, track);
     else if (track->par->codec_tag == MKTAG('t','m','c','d'))
         mov_write_tmcd_tag(pb, track);
+    else if (track->par->codec_tag == MKTAG('g','p','m','d'))
+        mov_write_gpmd_tag(pb, track);
     return update_size(pb, pos);
 }
 
@@ -2194,39 +2208,47 @@ static int mov_preroll_write_stbl_atoms(AVIOContext *pb, MOVTrack *track)
                                     (AVRational){1, 1000},
                                     (AVRational){1, 48000});
 
-    if (track->entry) {
-        sgpd_entries = av_malloc_array(track->entry, sizeof(*sgpd_entries));
-        if (!sgpd_entries)
-            return AVERROR(ENOMEM);
-    }
+    if (!track->entry)
+        return 0;
 
-    av_assert0(track->par->codec_id == AV_CODEC_ID_OPUS);
+    sgpd_entries = av_malloc_array(track->entry, sizeof(*sgpd_entries));
+    if (!sgpd_entries)
+        return AVERROR(ENOMEM);
 
-    for (i = 0; i < track->entry; i++) {
-        int roll_samples_remaining = roll_samples;
-        int distance = 0;
-        for (j = i - 1; j >= 0; j--) {
-            roll_samples_remaining -= get_cluster_duration(track, j);
-            distance++;
-            if (roll_samples_remaining <= 0)
-                break;
+    av_assert0(track->par->codec_id == AV_CODEC_ID_OPUS || track->par->codec_id == AV_CODEC_ID_AAC);
+
+    if (track->par->codec_id == AV_CODEC_ID_OPUS) {
+        for (i = 0; i < track->entry; i++) {
+            int roll_samples_remaining = roll_samples;
+            int distance = 0;
+            for (j = i - 1; j >= 0; j--) {
+                roll_samples_remaining -= get_cluster_duration(track, j);
+                distance++;
+                if (roll_samples_remaining <= 0)
+                    break;
+            }
+            /* We don't have enough preceeding samples to compute a valid
+               roll_distance here, so this sample can't be independently
+               decoded. */
+            if (roll_samples_remaining > 0)
+                distance = 0;
+            /* Verify distance is a minimum of 2 (60ms) packets and a maximum of
+               32 (2.5ms) packets. */
+            av_assert0(distance == 0 || (distance >= 2 && distance <= 32));
+            if (i && distance == sgpd_entries[entries].roll_distance) {
+                sgpd_entries[entries].count++;
+            } else {
+                entries++;
+                sgpd_entries[entries].count = 1;
+                sgpd_entries[entries].roll_distance = distance;
+                sgpd_entries[entries].group_description_index = distance ? ++group : 0;
+            }
         }
-        /* We don't have enough preceeding samples to compute a valid
-           roll_distance here, so this sample can't be independently
-           decoded. */
-        if (roll_samples_remaining > 0)
-            distance = 0;
-        /* Verify distance is a minimum of 2 (60ms) packets and a maximum of
-           32 (2.5ms) packets. */
-        av_assert0(distance == 0 || (distance >= 2 && distance <= 32));
-        if (i && distance == sgpd_entries[entries].roll_distance) {
-            sgpd_entries[entries].count++;
-        } else {
-            entries++;
-            sgpd_entries[entries].count = 1;
-            sgpd_entries[entries].roll_distance = distance;
-            sgpd_entries[entries].group_description_index = distance ? ++group : 0;
-        }
+    } else {
+        entries++;
+        sgpd_entries[entries].count = track->sample_count;
+        sgpd_entries[entries].roll_distance = 1;
+        sgpd_entries[entries].group_description_index = ++group;
     }
     entries++;
 
@@ -2290,7 +2312,7 @@ static int mov_write_stbl_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext
     if (track->cenc.aes_ctr) {
         ff_mov_cenc_write_stbl_atoms(&track->cenc, pb);
     }
-    if (track->par->codec_id == AV_CODEC_ID_OPUS) {
+    if (track->par->codec_id == AV_CODEC_ID_OPUS || track->par->codec_id == AV_CODEC_ID_AAC) {
         mov_preroll_write_stbl_atoms(pb, track);
     }
     return update_size(pb, pos);
@@ -2377,6 +2399,12 @@ static int mov_write_gmhd_tag(AVIOContext *pb, MOVTrack *track)
         ffio_wfourcc(pb, "tmcd");
         mov_write_tcmi_tag(pb, track);
         update_size(pb, tmcd_pos);
+    } else if (track->par->codec_tag == MKTAG('g','p','m','d')) {
+        int64_t gpmd_pos = avio_tell(pb);
+        avio_wb32(pb, 0); /* size */
+        ffio_wfourcc(pb, "gpmd");
+        avio_wb32(pb, 0); /* version */
+        update_size(pb, gpmd_pos);
     }
     return update_size(pb, pos);
 }
@@ -2443,6 +2471,9 @@ static int mov_write_hdlr_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *tra
         } else if (track->par->codec_tag == MKTAG('t','m','c','d')) {
             hdlr_type = "tmcd";
             descr = "TimeCodeHandler";
+        } else if (track->par->codec_tag == MKTAG('g','p','m','d')) {
+            hdlr_type = "meta";
+            descr = "GoPro MET"; // GoPro Metadata
         } else {
             av_log(s, AV_LOG_WARNING,
                    "Unknown hldr_type for %s, writing dummy values\n",
@@ -2514,6 +2545,8 @@ static int mov_write_minf_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext
             mov_write_nmhd_tag(pb);
         else
             mov_write_gmhd_tag(pb, track);
+    } else if (track->tag == MKTAG('g','p','m','d')) {
+        mov_write_gmhd_tag(pb, track);
     }
     if (track->mode == MODE_MOV) /* FIXME: Why do it for MODE_MOV only ? */
         mov_write_hdlr_tag(s, pb, NULL);
