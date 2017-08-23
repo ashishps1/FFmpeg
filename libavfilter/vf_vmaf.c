@@ -69,12 +69,10 @@ typedef struct VMAFContext {
     int enable_transform;
     int phone_model;
     char *pool;
-    DArray adm_array,
-           adm_scale_array[4],
-           motion_array,
-           motion2_array,
-           vif_scale_array[4],
-           vif_array;
+    svm_model *svm_model_ptr;
+    svm_node* nodes;
+    void (*pool_method)(double *score, double curr);
+    double prediction;
 } VMAFContext;
 
 #define OFFSET(x) offsetof(VMAFContext, x)
@@ -94,138 +92,9 @@ AVFILTER_DEFINE_CLASS(vmaf);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define INIT_FRAMES 1000
-
-const char *norm_type = "linear_rescale";
-
-const double score_clip[2] = {
-    0.0,
-    100.0
-};
-
-const char *feature_names[6] = {
-    "VMAF_feature_adm2_score",
-    "VMAF_feature_motion2_score",
-    "VMAF_feature_vif_scale0_score",
-    "VMAF_feature_vif_scale1_score",
-    "VMAF_feature_vif_scale2_score",
-    "VMAF_feature_vif_scale3_score"
-};
-
-const double intercepts[7] = {
-    -0.3092981927591963,
-    -1.7993968597186747,
-    -0.003017198086831897,
-    -0.1728125095425364,
-    -0.5294309090081222,
-    -0.7577185792093722,
-    -1.083428597549764
-};
-
-const char *model_type = "LIBSVMNUSVR";
-
-const double slopes[7] = {
-    0.012020766332648465,
-    2.8098077502505414,
-    0.06264407466686016,
-    1.222763456258933,
-    1.5360318811084146,
-    1.7620864995501058,
-    2.08656468286432
-};
-
-const double score_transform[3] = {
-    1.70674692,
-    1.72643844,
-    -0.00705305
-};
-
-void init_arr(DArray *a, size_t init_size)
-{
-    a->array = (double *) av_malloc(init_size * sizeof(double));
-    a->used = 0;
-    a->size = init_size;
-}
-
-void append_arr(DArray *a, double e)
-{
-    if (a->used == a->size) {
-        a->size *= 2;
-        a->array = (double *) av_realloc(a->array, a->size * sizeof(double));
-    }
-    a->array[a->used++] = e;
-}
-
-double get_at_pos(DArray *a, int pos)
-{
-    return a->array[pos];
-}
-
-void free_arr(DArray *a)
-{
-    av_free(a->array);
-    a->array = NULL;
-    a->used = a->size = 0;
-}
-
-extern int libsvm_version;
-
-typedef struct {
-    int index;
-    double value;
-} svm_node;
-
-typedef struct {
-    int l;
-    double *y;
-    svm_node **x;
-} svm_problem;
 
 enum { C_SVC, NU_SVC, ONE_CLASS, EPSILON_SVR, NU_SVR };    /** svm_type */
 enum { LINEAR, POLY, RBF, SIGMOID, PRECOMPUTED }; /** kernel_type */
-
-typedef struct {
-    int svm_type;
-    int kernel_type;
-    int degree;    /** for poly */
-    double gamma;    /** for poly/rbf/sigmoid */
-    double coef0;    /** for poly/sigmoid */
-
-    /** these are for training only */
-    double cache_size; /** in MB */
-    double eps;    /** stopping criteria */
-    double C;    /** for C_SVC, EPSILON_SVR and NU_SVR */
-    int nr_weight;        /** for C_SVC */
-    int *weight_label;    /** for C_SVC */
-    double* weight;        /** for C_SVC */
-    double nu;    /** for NU_SVC, ONE_CLASS, and NU_SVR */
-    double p;    /** for EPSILON_SVR */
-    int shrinking;    /** use the shrinking heuristics */
-    int probability; /** do probability estimates */
-} svm_parameter;
-
-/**
- * svm_model
- */
-typedef struct {
-    svm_parameter param;    /** parameter */
-    int nr_class;        /** number of classes, = 2 in regression/one class svm */
-    int l;            /** total #SV */
-    svm_node **SV;        /** SVs (SV[l]) */
-    double **sv_coef;    /** coefficients for SVs in decision functions (sv_coef[k-1][l]) */
-    double *rho;        /** constants in decision functions (rho[k*(k-1)/2]) */
-    double *probA;        /** pariwise probability information */
-    double *probB;
-    int *sv_indices;        /** sv_indices[0,...,nSV-1] are values in [1,...,num_traning_data] to indicate SVs in the training set */
-
-    /** for classification only */
-
-    int *label;        /** label of each class (label[k]) */
-    int *nSV;        /** number of SVs for each class (nSV[k]) */
-    /** nSV[0] + nSV[1] + ... + nSV[k-1] = l */
-    int free_sv;        /** 1 if svm_model is created by svm_load_model*/
-    /** 0 if svm_model is created by svm_train */
-} svm_model;
 
 #define swap(type, x, y) { type t=x; x=y; y=t; }
 
@@ -241,17 +110,6 @@ static inline double power(double base, int times)
     }
     return ret;
 }
-
-typedef struct {
-    const svm_node **x;
-    double *x_square;
-
-    // svm_parameter
-    const int kernel_type;
-    const int degree;
-    const double gamma;
-    const double coef0;
-} Kernel;
 
 static double dot(const svm_node *px, const svm_node *py)
 {
@@ -281,42 +139,42 @@ static double k_function(const svm_node *x, const svm_node *y,
         case POLY:
             return power(param->gamma * dot(x, y) + param->coef0, param->degree);
         case RBF: {
-                double sum = 0;
-                while(x->index != -1 && y->index !=-1) {
-                    if(x->index == y->index) {
-                        double d = x->value - y->value;
-                        sum += d * d;
-                        x++;
-                        y++;
-                    } else {
-                        if(x->index > y->index) {
-                            sum += y->value * y->value;
-                            y++;
-                        } else {
-                            sum += x->value * x->value;
-                            x++;
-                        }
-                    }
-                }
+                      double sum = 0;
+                      while(x->index != -1 && y->index !=-1) {
+                          if(x->index == y->index) {
+                              double d = x->value - y->value;
+                              sum += d * d;
+                              x++;
+                              y++;
+                          } else {
+                              if(x->index > y->index) {
+                                  sum += y->value * y->value;
+                                  y++;
+                              } else {
+                                  sum += x->value * x->value;
+                                  x++;
+                              }
+                          }
+                      }
 
-                while(x->index != -1) {
-                    sum += x->value * x->value;
-                    x++;
-                }
+                      while(x->index != -1) {
+                          sum += x->value * x->value;
+                          x++;
+                      }
 
-                while(y->index != -1) {
-                    sum += y->value * y->value;
-                    y++;
-                }
+                      while(y->index != -1) {
+                          sum += y->value * y->value;
+                          y++;
+                      }
 
-                return exp(-param->gamma * sum);
-            }
+                      return exp(-param->gamma * sum);
+                  }
         case SIGMOID:
-            return tanh(param->gamma * dot(x, y) + param->coef0);
+                  return tanh(param->gamma * dot(x, y) + param->coef0);
         case PRECOMPUTED:  //x: test (validation), y: SV
-            return x[(int)(y->value)].value;
+                  return x[(int)(y->value)].value;
         default:
-            return 0;  // Unreachable
+                  return 0;  // Unreachable
     }
 }
 
@@ -727,8 +585,8 @@ static void harmonic_mean(double *score, double curr)
     int h = s->height; \
     int i,j; \
     \
-    int ref_stride = ref->linesize[0]; \
-    int main_stride = main->linesize[0]; \
+    ptrdiff_t ref_stride = ref->linesize[0]; \
+    ptrdiff_t main_stride = main->linesize[0]; \
     \
     const type *ref_ptr = (const type *) ref->data[0]; \
     const type *main_ptr = (const type *) main->data[0]; \
@@ -777,19 +635,14 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     } else {
         offset_10bit(s, ref, main, stride);
     }
-    
+
     motion_data_sz = (size_t)motion_stride * s->height;
 
     compute_adm2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->adm_data_buf,
                  s->adm_temp_lo, s->adm_temp_hi);
-
-    append_arr(&s->adm_array, (double)(s->score_num / s->score_den ));
-    j = 0;
-    for(i = 0; j < 4; i += 2) {
-        append_arr(&s->adm_scale_array[j], (double)(s->scores[i] / s->scores[i+1]));
-        j++;
-    }
+    s->nodes[0].index = 1;
+    s->nodes[0].value = (double)(slopes[1]) * (double)(s->score_num / s->score_den) + (double)(intercepts[1]);
 
     if (s->desc->comp[0].depth <= 8) {
         ref_px_stride = ref_stride / sizeof(uint8_t);
@@ -812,13 +665,9 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
 
     memcpy(s->prev_blur_data, s->blur_data, motion_data_sz);
 
-    append_arr(&s->motion_array, s->score);
-
-    if(s->nb_frames) {
-        append_arr(&s->motion2_array, FFMIN(s->prev_motion_score, s->score));
-    }
-
     s->prev_motion_score = s->score;
+    s->nodes[1].index = 2;
+    s->nodes[1].value = (double)(slopes[2]) * (double)FFMIN(s->prev_motion_score, s->score) + (double)(intercepts[2]);
 
     compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
@@ -826,11 +675,36 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
 
     j = 0;
     for(i = 0; j < 4; i += 2) {
-        append_arr(&s->vif_scale_array[j], (double)((s->scores[i]) / (s->scores[i+1])));
+        s->nodes[j+2].index = j+3;
+        s->nodes[j+2].value = (double)(slopes[j+3]) * (double)((s->scores[i]) / (s->scores[i+1])) + (double)(intercepts[j+3]);
         j++;
     }
-    append_arr(&s->vif_array, s->score);
 
+    s->prediction = svm_predict(s->svm_model_ptr, s->nodes);
+
+    if (!av_strcasecmp(norm_type, "linear_rescale")) {
+        /** denormalize */
+        s->prediction = (s->prediction - (double)(intercepts[0])) / (double)(slopes[0]);
+    }
+
+    /* score transform */
+    if (s->enable_transform) {
+        double value = 0.0;
+
+        /* quadratic transform */
+        value += (double)(score_transform[0]);
+        value += (double)(score_transform[1]) * s->prediction;
+        value += (double)(score_transform[2]) * s->prediction * s->prediction;
+
+        /* rectification */
+        if (value < s->prediction) {
+            value = s->prediction;
+        }
+
+        s->prediction = value;
+    }
+
+    s->pool_method(&s->vmaf_score, s->prediction);
     return 0;
 }
 
@@ -855,16 +729,17 @@ static av_cold int init(AVFilterContext *ctx)
             s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
         }
 
-        init_arr(&s->adm_array, INIT_FRAMES);
-        for(i = 0; i < 4; i++) {
-            init_arr(&s->adm_scale_array[i], INIT_FRAMES);
+        s->svm_model_ptr = svm_load_model(s->model_path, ctx);
+        s->nodes = (svm_node *) av_malloc(sizeof(svm_node) * (6 + 1));
+        s->nodes[6].index = -1;
+        if(!av_strcasecmp(s->pool, "mean")) {
+            s->pool_method = mean;
+        } else if(!av_strcasecmp(s->pool, "min")) {
+            s->vmaf_score = INT_MAX;
+            s->pool_method = min;
+        } else if(!av_strcasecmp(s->pool, "harmonic")) {
+            s->pool_method = harmonic_mean;
         }
-        init_arr(&s->motion_array, INIT_FRAMES);
-        init_arr(&s->motion2_array, INIT_FRAMES);
-        for(i = 0; i < 4; i++) {
-            init_arr(&s->vif_scale_array[i], INIT_FRAMES);
-        }
-        init_arr(&s->vif_array, INIT_FRAMES);
     }
 
     s->called = 1;
@@ -891,11 +766,11 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     VMAFContext *s = ctx->priv;
-    int stride;
+    ptrdiff_t stride;
     size_t data_sz;
-    int adm_buf_stride;
+    ptrdiff_t adm_buf_stride;
     size_t adm_buf_sz;
-    int vif_buf_stride;
+    ptrdiff_t vif_buf_stride;
     size_t vif_buf_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
@@ -1010,140 +885,19 @@ static int request_frame(AVFilterLink *outlink)
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFContext *s = ctx->priv;
-    int i, j;
 
     if (s->nb_frames > 0) {
-        double prediction;
-        double score = 0.0;
-        void (*pool_method)(double *score, double curr);        
-        svm_model *svm_model_ptr = svm_load_model(s->model_path, ctx);
-        svm_node* nodes = (svm_node*) av_malloc(sizeof(svm_node) * (6 + 1));
-        nodes[6].index = -1;
-        append_arr(&s->motion2_array, s->prev_motion_score);
         if(!av_strcasecmp(s->pool, "mean")) {
-            pool_method = mean;
+            s->vmaf_score = s->vmaf_score / s->nb_frames;
         } else if(!av_strcasecmp(s->pool, "min")) {
-            score = INT_MAX;
-            pool_method = min;
+            s->vmaf_score = s->vmaf_score;
         } else if(!av_strcasecmp(s->pool, "harmonic")) {
-            pool_method = harmonic_mean;
-        }
-
-        for (i = 0; i < s->nb_frames; i++) {
-            if (!av_strcasecmp(norm_type, "linear_rescale")) {
-                for (j = 0; j < 6; j++) {
-                    nodes[j].index = j + 1;
-                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_array, i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[0], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[1], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[2], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->adm_scale_array[3], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->motion_array, i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[0], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[1], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[2], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_scale_array[3], i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->vif_array, i) + (double)(intercepts[j + 1]);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score")) {
-                        nodes[j].value = (double)(slopes[j + 1]) * get_at_pos(&s->motion2_array, i) + (double)(intercepts[j + 1]);
-                    } else {
-                        av_log(ctx, AV_LOG_ERROR, "Unknown feature name: %s.\n", feature_names[j]);
-                    }
-                }
-            }
-            else {
-                for (j = 0; j < 6; j++) {
-                    nodes[j].index = j + 1;
-                    if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm2_score")) {
-                        nodes[j].value = get_at_pos(&s->adm_array, i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale0_score")) {
-                        nodes[j].value = get_at_pos(&s->adm_scale_array[0], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale1_score")) {
-                        nodes[j].value = get_at_pos(&s->adm_scale_array[1], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale2_score")) {
-                        nodes[j].value = get_at_pos(&s->adm_scale_array[2], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_adm_scale3_score")) {
-                        nodes[j].value = get_at_pos(&s->adm_scale_array[3], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion_score")) {
-                        nodes[j].value = get_at_pos(&s->motion_array, i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale0_score")) {
-                        nodes[j].value = get_at_pos(&s->vif_scale_array[0], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale1_score")) {
-                        nodes[j].value = get_at_pos(&s->vif_scale_array[1], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale2_score")) {
-                        nodes[j].value = get_at_pos(&s->vif_scale_array[2], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_scale3_score")) {
-                        nodes[j].value = get_at_pos(&s->vif_scale_array[3], i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_vif_score")) {
-                        nodes[j].value = get_at_pos(&s->vif_array, i);
-                    } else if (!av_strcasecmp(feature_names[j], "VMAF_feature_motion2_score")) {
-                        nodes[j].value = get_at_pos(&s->motion2_array, i);
-                    } else {
-                        av_log(ctx, AV_LOG_ERROR, "Unknown feature name: %s.\n", feature_names[j]);
-                    }
-                }
-            }
-
-            prediction = svm_predict(svm_model_ptr, nodes);
-
-            if (!av_strcasecmp(norm_type, "linear_rescale")) {
-                /** denormalize */
-                prediction = (prediction - (double)(intercepts[0])) / (double)(slopes[0]);
-            }
-
-            /* score transform */
-            if (s->enable_transform) {
-                double value = 0.0;
-
-                /* quadratic transform */
-                value += (double)(score_transform[0]);
-                value += (double)(score_transform[1]) * prediction;
-                value += (double)(score_transform[2]) * prediction * prediction;
-
-                /* rectification */
-                if (value < prediction) {
-                    value = prediction;
-                }
-
-                prediction = value;
-            }
-
-                pool_method(&score, prediction);
-            }
-
-        if(!av_strcasecmp(s->pool, "mean")) {
-            s->vmaf_score = score / s->nb_frames;
-        } else if(!av_strcasecmp(s->pool, "min")) {
-            s->vmaf_score = score;
-        } else if(!av_strcasecmp(s->pool, "harmonic")) {
-            s->vmaf_score = 1.0 / (score / s->nb_frames) - 1.0;
+            s->vmaf_score = 1.0 / (s->vmaf_score / s->nb_frames) - 1.0;
         }
 
         av_log(ctx, AV_LOG_INFO, "VMAF Score: %.3f\n", s->vmaf_score);
 
-        svm_free_and_destroy_model((svm_model **)&svm_model_ptr);
-
-        free_arr(&s->adm_array);
-        for(i = 0; i < 4; i++) {
-            free_arr(&s->adm_scale_array[i]);
-        }
-        free_arr(&s->motion_array);
-        free_arr(&s->motion2_array);
-        for(i = 0; i < 4; i++) {
-            free_arr(&s->vif_scale_array[i]);
-        }
-        free_arr(&s->vif_array);
+        svm_free_and_destroy_model((svm_model **)&s->svm_model_ptr);
 
         av_free(s->ref_data);
         av_free(s->main_data);

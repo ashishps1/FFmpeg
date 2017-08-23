@@ -83,7 +83,7 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
 
 /** function to compute adm score */
 int compute_adm2(const float *ref, const float *main, int w, int h,
-                 int ref_stride, int main_stride, double *score,
+                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp_lo, float* temp_hi);
 

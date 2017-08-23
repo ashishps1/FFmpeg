@@ -94,10 +94,10 @@ static float get_cube(float val)
     return val * val * val;
 }
 
-static float adm_sum_cube(const float *x, int w, int h, int stride,
+static float adm_sum_cube(const float *x, int w, int h, ptrdiff_t stride,
                           double border_factor)
 {
-    int px_stride = stride / sizeof(float);
+    ptrdiff_t px_stride = stride / sizeof(float);
     int left   = w * border_factor - 0.5;
     int top    = h * border_factor - 0.5;
     int right  = w - left;
@@ -115,22 +115,22 @@ static float adm_sum_cube(const float *x, int w, int h, int stride,
         }
     }
 
-    return powf(sum, 1.0f / 3.0f) + powf((bottom - top) * (right - left) /
-                                         32.0f, 1.0f / 3.0f);
+    return powf(sum, 1.0 / 3.0) + powf((bottom - top) * (right - left) /
+                                         32.0, 1.0 / 3.0);
 }
 
 static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
                          const adm_dwt_band_t *r, const adm_dwt_band_t *a,
-                         int w, int h, int ref_stride, int main_stride,
-                         int r_stride, int a_stride)
+                         int w, int h, ptrdiff_t ref_stride, ptrdiff_t main_stride,
+                         ptrdiff_t r_stride, ptrdiff_t a_stride)
 {
     const float cos_1deg_sq = cos(1.0 * M_PI / 180.0) * cos(1.0 * M_PI / 180.0);
     const float eps = 1e-30;
 
-    int ref_px_stride = ref_stride / sizeof(float);
-    int main_px_stride = main_stride / sizeof(float);
-    int r_px_stride = r_stride / sizeof(float);
-    int a_px_stride = a_stride / sizeof(float);
+    ptrdiff_t ref_px_stride = ref_stride / sizeof(float);
+    ptrdiff_t main_px_stride = main_stride / sizeof(float);
+    ptrdiff_t r_px_stride = r_stride / sizeof(float);
+    ptrdiff_t a_px_stride = a_stride / sizeof(float);
 
     float oh, ov, od, th, tv, td;
     float kh, kv, kd, tmph, tmpv, tmpd;
@@ -151,41 +151,21 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
             kv = DIVS(tv, ov + eps);
             kd = DIVS(td, od + eps);
 
-            kh = kh < 0.0f ? 0.0f : (kh > 1.0f ? 1.0f : kh);
+            kh = kh < 0.0 ? 0.0 : (kh > 1.0 ? 1.0 : kh);
 
 
-            kv = kv < 0.0f ? 0.0f : (kv > 1.0f ? 1.0f : kv);
-            kd = kd < 0.0f ? 0.0f : (kd > 1.0f ? 1.0f : kd);
+            kv = kv < 0.0 ? 0.0 : (kv > 1.0 ? 1.0 : kv);
+            kd = kd < 0.0 ? 0.0 : (kd > 1.0 ? 1.0 : kd);
 
             tmph = kh * oh;
             tmpv = kv * ov;
             tmpd = kd * od;
-            /** Determine if angle between (oh,ov) and (th,tv) is less than 1 degree.
-             * Given that u is the angle (oh,ov) and v is the angle (th,tv), this can
-             * be done by testing the inequvality.
-             *
-             * { (u.v.) >= 0 } AND { (u.v)^2 >= cos(1deg)^2 * ||u||^2 * ||v||^2 }
-             *
-             * Proof:
-             *
-             * cos(theta) = (u.v) / (||u|| * ||v||)
-             *
-             * IF u.v >= 0 THEN
-             *   cos(theta)^2 = (u.v)^2 / (||u||^2 * ||v||^2)
-             *   (u.v)^2 = cos(theta)^2 * ||u||^2 * ||v||^2
-             *
-             *   IF |theta| < 1deg THEN
-             *     (u.v)^2 >= cos(1deg)^2 * ||u||^2 * ||v||^2
-             *   END
-             * ELSE
-             *   |theta| > 90deg
-             * END
-             */
+
             ot_dp = oh * th + ov * tv;
             o_mag_sq = oh * oh + ov * ov;
             t_mag_sq = th * th + tv * tv;
 
-            angle_flag = (ot_dp >= 0.0f) && (ot_dp * ot_dp >= cos_1deg_sq *
+            angle_flag = (ot_dp >= 0.0) && (ot_dp * ot_dp >= cos_1deg_sq *
                                              o_mag_sq * t_mag_sq);
 
             if (angle_flag) {
@@ -206,8 +186,8 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
 }
 
 static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
-                    int orig_h, int scale, int w, int h, int src_stride,
-                    int dst_stride)
+                    int orig_h, int scale, int w, int h, ptrdiff_t src_stride,
+                    ptrdiff_t dst_stride)
 {
     const float *src_angles[3] = { src->band_h, src->band_v, src->band_d };
     float *dst_angles[3]       = { dst->band_h, dst->band_v, dst->band_d };
@@ -215,12 +195,12 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     const float *src_ptr;
     float *dst_ptr;
 
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
 
     float factor1 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 1);
     float factor2 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 2);
-    float rfactor[3] = {1.0f / factor1, 1.0f / factor1, 1.0f / factor2};
+    float rfactor[3] = {1.0 / factor1, 1.0 / factor1, 1.0 / factor2};
 
     int i, j, theta;
 
@@ -238,13 +218,13 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 }
 
 static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
-                          int src_stride, int dst_stride)
+                          ptrdiff_t src_stride, ptrdiff_t dst_stride)
 {
     const float *angles[3] = { src->band_h, src->band_v, src->band_d };
     const float *src_ptr;
 
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
 
     float filt_coeff, img_coeff;
 
@@ -264,8 +244,8 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
 
                 for (filt_i = 0; filt_i < 3; filt_i++) {
                     for (filt_j = 0; filt_j < 3; filt_j++) {
-                        filt_coeff = (filt_i == 1 && filt_j == 1) ? 1.0f / 15.0f : 1.0f /
-                            30.0f;
+                        filt_coeff = (filt_i == 1 && filt_j == 1) ? 1.0 / 15.0 : 1.0 /
+                            30.0;
 
                         src_i = i - 1 + filt_i;
                         src_j = j - 1 + filt_j;
@@ -291,12 +271,12 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
 }
 
 static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
-                   const float *thresh, int w, int h, int src_stride,
-                   int dst_stride, int thresh_stride)
+                   const float *thresh, int w, int h, ptrdiff_t src_stride,
+                   ptrdiff_t dst_stride, ptrdiff_t thresh_stride)
 {
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
-    int thresh_px_stride = thresh_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t thresh_px_stride = thresh_stride / sizeof(float);
 
     float xh, xv, xd, thr;
 
@@ -313,9 +293,9 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
             xv = fabsf(xv) - thr;
             xd = fabsf(xd) - thr;
 
-            xh = xh < 0.0f ? 0.0f : xh;
-            xv = xv < 0.0f ? 0.0f : xv;
-            xd = xd < 0.0f ? 0.0f : xd;
+            xh = xh < 0.0 ? 0.0 : xh;
+            xv = xv < 0.0 ? 0.0 : xv;
+            xd = xd < 0.0 ? 0.0 : xd;
 
             dst->band_h[i * dst_px_stride + j] = xh;
             dst->band_v[i * dst_px_stride + j] = xv;
@@ -325,15 +305,15 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 }
 
 static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
-                     int src_stride, int dst_stride, float *temp_lo,
+                     ptrdiff_t src_stride, ptrdiff_t dst_stride, float *temp_lo,
                      float* temp_hi)
 {
     const float *filter_lo = dwt2_db2_coeffs_lo;
     const float *filter_hi = dwt2_db2_coeffs_hi;
     int filt_w = sizeof(dwt2_db2_coeffs_lo) / sizeof(float);
 
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
 
     float filt_coeff_lo, filt_coeff_hi, img_coeff;
 
@@ -422,7 +402,7 @@ static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
 }
 
 static void adm_buffer_copy(const void *src, void *dst, int linewidth, int h,
-                            int src_stride, int dst_stride)
+                            ptrdiff_t src_stride, ptrdiff_t dst_stride)
 {
     const char *src_p = src;
     char *dst_p = dst;
@@ -449,7 +429,7 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
 }
 
 int compute_adm2(const float *ref, const float *main, int w, int h,
-                 int ref_stride, int main_stride, double *score,
+                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp_lo, float* temp_hi)
 {
@@ -476,12 +456,12 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
 
     const float *curr_ref_scale = (float *) ref;
     const float *curr_main_scale = (float *) main;
-    int curr_ref_stride = ref_stride;
-    int curr_main_stride = main_stride;
+    ptrdiff_t curr_ref_stride = ref_stride;
+    ptrdiff_t curr_main_stride = main_stride;
 
     int orig_h = h;
 
-    int buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(float));
+    ptrdiff_t buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(float));
     size_t buf_sz = (size_t)buf_stride * ((h + 1) / 2);
 
     double num = 0;
@@ -580,8 +560,8 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
     int h = s->height; \
     int i,j; \
     \
-    int ref_stride = ref->linesize[0]; \
-    int main_stride = main->linesize[0]; \
+    ptrdiff_t ref_stride = ref->linesize[0]; \
+    ptrdiff_t main_stride = main->linesize[0]; \
     \
     const type *ref_ptr = (const type *) ref->data[0]; \
     const type *main_ptr = (const type *) main->data[0]; \
@@ -624,7 +604,7 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int w = s->width;
     int h = s->height;
 
-    int stride;
+    ptrdiff_t stride;
 
     stride = ALIGN_CEIL(w * sizeof(float));
 
@@ -675,9 +655,9 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     ADMContext *s = ctx->priv;
-    int buf_stride;
+    ptrdiff_t buf_stride;
     size_t buf_sz;
-    int stride;
+    ptrdiff_t stride;
     size_t data_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||

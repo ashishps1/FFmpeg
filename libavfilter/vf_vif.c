@@ -60,10 +60,10 @@ static const AVOption vif_options[] = {
 AVFILTER_DEFINE_CLASS(vif);
 
 static void vif_dec2(const float *src, float *dst, int src_w, int src_h,
-                     int src_stride, int dst_stride)
+                     ptrdiff_t src_stride, ptrdiff_t dst_stride)
 {
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
 
     int i, j;
 
@@ -75,9 +75,9 @@ static void vif_dec2(const float *src, float *dst, int src_w, int src_h,
     }
 }
 
-static float vif_sum(const float *x, int w, int h, int stride)
+static float vif_sum(const float *x, int w, int h, ptrdiff_t stride)
 {
-    int px_stride = stride / sizeof(float);
+    ptrdiff_t px_stride = stride / sizeof(float);
     int i, j;
 
     float sum = 0;
@@ -99,22 +99,22 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
                           const float *mu1_mu2, const float *xx_filt,
                           const float *yy_filt, const float *xy_filt,
                           float *num, float *den, int w, int h,
-                          int mu1_sq_stride, int mu2_sq_stride,
-                          int mu1_mu2_stride, int xx_filt_stride,
-                          int yy_filt_stride, int xy_filt_stride,
-                          int num_stride, int den_stride)
+                          ptrdiff_t mu1_sq_stride, ptrdiff_t mu2_sq_stride,
+                          ptrdiff_t mu1_mu2_stride, ptrdiff_t xx_filt_stride,
+                          ptrdiff_t yy_filt_stride, ptrdiff_t xy_filt_stride,
+                          ptrdiff_t num_stride, ptrdiff_t den_stride)
 {
     static const float sigma_nsq = 2;
     static const float sigma_max_inv = 4.0/(255.0*255.0);
 
-    int mu1_sq_px_stride  = mu1_sq_stride / sizeof(float);
-    int mu2_sq_px_stride  = mu2_sq_stride / sizeof(float);
-    int mu1_mu2_px_stride = mu1_mu2_stride / sizeof(float);
-    int xx_filt_px_stride = xx_filt_stride / sizeof(float);
-    int yy_filt_px_stride = yy_filt_stride / sizeof(float);
-    int xy_filt_px_stride = xy_filt_stride / sizeof(float);
-    int num_px_stride = num_stride / sizeof(float);
-    int den_px_stride = den_stride / sizeof(float);
+    ptrdiff_t mu1_sq_px_stride  = mu1_sq_stride / sizeof(float);
+    ptrdiff_t mu2_sq_px_stride  = mu2_sq_stride / sizeof(float);
+    ptrdiff_t mu1_mu2_px_stride = mu1_mu2_stride / sizeof(float);
+    ptrdiff_t xx_filt_px_stride = xx_filt_stride / sizeof(float);
+    ptrdiff_t yy_filt_px_stride = yy_filt_stride / sizeof(float);
+    ptrdiff_t xy_filt_px_stride = xy_filt_stride / sizeof(float);
+    ptrdiff_t num_px_stride = num_stride / sizeof(float);
+    ptrdiff_t den_px_stride = den_stride / sizeof(float);
 
     float mu1_sq_val, mu2_sq_val, mu1_mu2_val, xx_filt_val, yy_filt_val, xy_filt_val;
     float sigma1_sq, sigma2_sq, sigma12, g, sv_sq;
@@ -155,14 +155,14 @@ static void vif_statistic(const float *mu1_sq, const float *mu2_sq,
 }
 
 static void vif_xx_yy_xy(const float *x, const float *y, float *xx, float *yy,
-                         float *xy, int w, int h, int xstride, int ystride,
-                         int xxstride, int yystride, int xystride)
+                         float *xy, int w, int h, ptrdiff_t xstride, ptrdiff_t ystride,
+                         ptrdiff_t xxstride, ptrdiff_t yystride, ptrdiff_t xystride)
 {
-    int x_px_stride = xstride / sizeof(float);
-    int y_px_stride = ystride / sizeof(float);
-    int xx_px_stride = xxstride / sizeof(float);
-    int yy_px_stride = yystride / sizeof(float);
-    int xy_px_stride = xystride / sizeof(float);
+    ptrdiff_t x_px_stride = xstride / sizeof(float);
+    ptrdiff_t y_px_stride = ystride / sizeof(float);
+    ptrdiff_t xx_px_stride = xxstride / sizeof(float);
+    ptrdiff_t yy_px_stride = yystride / sizeof(float);
+    ptrdiff_t xy_px_stride = xystride / sizeof(float);
 
     int i, j;
 
@@ -185,11 +185,11 @@ static void vif_xx_yy_xy(const float *x, const float *y, float *xx, float *yy,
 }
 
 static void vif_filter1d(const float *filter, const float *src, float *dst,
-                         float *temp_buf, int w, int h, int src_stride,
-                         int dst_stride, int filt_w, float *temp)
+                         float *temp_buf, int w, int h, ptrdiff_t src_stride,
+                         ptrdiff_t dst_stride, int filt_w, float *temp)
 {
-    int src_px_stride = src_stride / sizeof(float);
-    int dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(float);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
 
     float filt_coeff, img_coeff;
 
@@ -235,7 +235,7 @@ static void vif_filter1d(const float *filter, const float *src, float *dst,
 }
 
 int compute_vif2(const float *ref, const float *main, int w, int h,
-                 int ref_stride, int main_stride, double *score,
+                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp)
 {
@@ -261,10 +261,10 @@ int compute_vif2(const float *ref, const float *main, int w, int h,
 
     const float *curr_ref_scale = ref;
     const float *curr_main_scale = main;
-    int curr_ref_stride = ref_stride;
-    int curr_main_stride = main_stride;
+    ptrdiff_t curr_ref_stride = ref_stride;
+    ptrdiff_t curr_main_stride = main_stride;
 
-    int buf_stride = ALIGN_CEIL(w * sizeof(float));
+    ptrdiff_t buf_stride = ALIGN_CEIL(w * sizeof(float));
     size_t buf_sz = (size_t)buf_stride * h;
 
     double num = 0;
@@ -410,8 +410,8 @@ int compute_vif2(const float *ref, const float *main, int w, int h,
     int h = s->height; \
     int i,j; \
     \
-    int ref_stride = ref->linesize[0]; \
-    int main_stride = main->linesize[0]; \
+    ptrdiff_t ref_stride = ref->linesize[0]; \
+    ptrdiff_t main_stride = main->linesize[0]; \
     \
     const type *ref_ptr = (const type *) ref->data[0]; \
     const type *main_ptr = (const type *) main->data[0]; \
@@ -454,7 +454,7 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int w = s->width;
     int h = s->height;
 
-    double stride;
+    ptrdiff_t stride;
 
     stride = ALIGN_CEIL(w * sizeof(float));
 
@@ -504,7 +504,7 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     VIFContext *s = ctx->priv;
-    int stride;
+    ptrdiff_t stride;
     size_t data_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||

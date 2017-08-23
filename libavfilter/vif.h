@@ -38,7 +38,7 @@ static const float vif_filter_table[4][17] = {
 };
 
 int compute_vif2(const float *ref, const float *main, int w, int h,
-                 int ref_stride, int main_stride, double *score,
+                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  float *data_buf, float *temp);
 
