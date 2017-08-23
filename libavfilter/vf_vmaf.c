@@ -308,9 +308,9 @@ static char* readline(FILE *input)
 
     while(strrchr(line, '\n') == NULL) {
         max_line_len *= 2;
-        line = (char *) realloc(line,max_line_len);
+        line = (char *) realloc(line, max_line_len);
         len = (int) strlen(line);
-        if(fgets(line+len,max_line_len-len,input) == NULL) {
+        if(fgets(line+len, max_line_len-len, input) == NULL) {
             break;
         }
     }
@@ -665,9 +665,9 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
 
     memcpy(s->prev_blur_data, s->blur_data, motion_data_sz);
 
-    s->prev_motion_score = s->score;
     s->nodes[1].index = 2;
     s->nodes[1].value = (double)(slopes[2]) * (double)FFMIN(s->prev_motion_score, s->score) + (double)(intercepts[2]);
+    s->prev_motion_score = s->score;
 
     compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
                  &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
