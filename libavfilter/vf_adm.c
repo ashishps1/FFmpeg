@@ -42,11 +42,9 @@ typedef struct ADMContext {
     const AVPixFmtDescriptor *desc;
     int width;
     int height;
-    float *ref_data;
-    float *main_data;
-    float *data_buf;
-    float *temp_lo;
-    float *temp_hi;
+    int *data_buf;
+    int *temp_lo;
+    int *temp_hi;
     double adm_sum;
     uint64_t nb_frames;
 } ADMContext;
@@ -64,7 +62,7 @@ AVFILTER_DEFINE_CLASS(adm);
 static float rcp(float x)
 {
     float xi = _mm_cvtss_f32(_mm_rcp_ss(_mm_load_ss(&x)));
-    return xi + xi * (1.0f - x * xi);
+    return xi + xi * (1.0 - x * xi);
 }
 
 #define DIVS(n, d) ((n) * rcp(d))
@@ -89,34 +87,31 @@ av_always_inline static float dwt_quant_step(const struct dwt_model_params *para
     return Q;
 }
 
-static float get_cube(float val)
+static int get_cube(int val)
 {
     return val * val * val;
 }
 
-static float adm_sum_cube(const float *x, int w, int h, ptrdiff_t stride,
+static float adm_sum_cube(const int *x, int w, int h, ptrdiff_t stride,
                           double border_factor)
 {
-    ptrdiff_t px_stride = stride / sizeof(float);
-    int left   = w * border_factor - 0.5;
-    int top    = h * border_factor - 0.5;
-    int right  = w - left;
+    ptrdiff_t px_stride = stride / sizeof(int);
+    int left = w * border_factor - 0.5;
+    int top = h * border_factor - 0.5;
+    int right = w - left;
     int bottom = h - top;
 
     int i, j;
 
-    float val;
-    float sum = 0;
+    int sum = 0;
 
     for (i = top; i < bottom; i++) {
         for (j = left; j < right; j++) {
-            val = fabsf(x[i * px_stride + j]);
-            sum += get_cube(val);
+            sum += get_cube(FFABS(x[i * px_stride + j]));
         }
     }
 
-    return powf(sum, 1.0 / 3.0) + powf((bottom - top) * (right - left) /
-                                         32.0, 1.0 / 3.0);
+    return cbrt(sum) + cbrt((bottom - top) * (right - left) / 32.0);
 }
 
 static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
@@ -127,12 +122,12 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
     const float cos_1deg_sq = cos(1.0 * M_PI / 180.0) * cos(1.0 * M_PI / 180.0);
     const float eps = 1e-30;
 
-    ptrdiff_t ref_px_stride = ref_stride / sizeof(float);
-    ptrdiff_t main_px_stride = main_stride / sizeof(float);
-    ptrdiff_t r_px_stride = r_stride / sizeof(float);
-    ptrdiff_t a_px_stride = a_stride / sizeof(float);
+    ptrdiff_t ref_px_stride = ref_stride / sizeof(int);
+    ptrdiff_t main_px_stride = main_stride / sizeof(int);
+    ptrdiff_t r_px_stride = r_stride / sizeof(int);
+    ptrdiff_t a_px_stride = a_stride / sizeof(int);
 
-    float oh, ov, od, th, tv, td;
+    int oh, ov, od, th, tv, td;
     float kh, kv, kd, tmph, tmpv, tmpd;
     float ot_dp, o_mag_sq, t_mag_sq;
     int angle_flag;
@@ -166,7 +161,7 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
             t_mag_sq = th * th + tv * tv;
 
             angle_flag = (ot_dp >= 0.0) && (ot_dp * ot_dp >= cos_1deg_sq *
-                                             o_mag_sq * t_mag_sq);
+                                            o_mag_sq * t_mag_sq);
 
             if (angle_flag) {
                 tmph = th;
@@ -189,14 +184,14 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                     int orig_h, int scale, int w, int h, ptrdiff_t src_stride,
                     ptrdiff_t dst_stride)
 {
-    const float *src_angles[3] = { src->band_h, src->band_v, src->band_d };
-    float *dst_angles[3]       = { dst->band_h, dst->band_v, dst->band_d };
+    const int *src_angles[3] = { src->band_h, src->band_v, src->band_d };
+    int *dst_angles[3] = { dst->band_h, dst->band_v, dst->band_d };
 
-    const float *src_ptr;
-    float *dst_ptr;
+    const int *src_ptr;
+    int *dst_ptr;
 
-    ptrdiff_t src_px_stride = src_stride / sizeof(float);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(int);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(int);
 
     float factor1 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 1);
     float factor2 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 2);
@@ -217,14 +212,14 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     }
 }
 
-static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
+static void adm_cm_thresh(const adm_dwt_band_t *src, int *dst, int w, int h,
                           ptrdiff_t src_stride, ptrdiff_t dst_stride)
 {
-    const float *angles[3] = { src->band_h, src->band_v, src->band_d };
-    const float *src_ptr;
+    const int *angles[3] = { src->band_h, src->band_v, src->band_d };
+    const int *src_ptr;
 
-    ptrdiff_t src_px_stride = src_stride / sizeof(float);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(int);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(int);
 
     float filt_coeff, img_coeff;
 
@@ -258,7 +253,7 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
                         if (src_j >= w) {
                             src_j = 2 * w - src_j - 1;
                         }
-                        img_coeff = fabsf(src_ptr[src_i * src_px_stride + src_j]);
+                        img_coeff = FFABS(src_ptr[src_i * src_px_stride + src_j]);
 
                         sum += filt_coeff * img_coeff;
                     }
@@ -271,14 +266,14 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, float *dst, int w, int h,
 }
 
 static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
-                   const float *thresh, int w, int h, ptrdiff_t src_stride,
+                   const int *thresh, int w, int h, ptrdiff_t src_stride,
                    ptrdiff_t dst_stride, ptrdiff_t thresh_stride)
 {
-    ptrdiff_t src_px_stride = src_stride / sizeof(float);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
-    ptrdiff_t thresh_px_stride = thresh_stride / sizeof(float);
+    ptrdiff_t src_px_stride = src_stride / sizeof(int);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(int);
+    ptrdiff_t thresh_px_stride = thresh_stride / sizeof(int);
 
-    float xh, xv, xd, thr;
+    int xh, xv, xd, thr;
 
     int i, j;
 
@@ -289,13 +284,13 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
             xd  = src->band_d[i * src_px_stride + j];
             thr = thresh[i * thresh_px_stride + j];
 
-            xh = fabsf(xh) - thr;
-            xv = fabsf(xv) - thr;
-            xd = fabsf(xd) - thr;
+            xh = FFABS(xh) - thr;
+            xv = FFABS(xv) - thr;
+            xd = FFABS(xd) - thr;
 
-            xh = xh < 0.0 ? 0.0 : xh;
-            xv = xv < 0.0 ? 0.0 : xv;
-            xd = xd < 0.0 ? 0.0 : xd;
+            xh = xh < 0 ? 0 : xh;
+            xv = xv < 0 ? 0 : xv;
+            xd = xd < 0 ? 0 : xd;
 
             dst->band_h[i * dst_px_stride + j] = xh;
             dst->band_v[i * dst_px_stride + j] = xv;
@@ -304,102 +299,106 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     }
 }
 
-static void adm_dwt2(const float *src, const adm_dwt_band_t *dst, int w, int h,
-                     ptrdiff_t src_stride, ptrdiff_t dst_stride, float *temp_lo,
-                     float* temp_hi)
-{
-    const float *filter_lo = dwt2_db2_coeffs_lo;
-    const float *filter_hi = dwt2_db2_coeffs_hi;
-    int filt_w = sizeof(dwt2_db2_coeffs_lo) / sizeof(float);
-
-    ptrdiff_t src_px_stride = src_stride / sizeof(float);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(float);
-
-    float filt_coeff_lo, filt_coeff_hi, img_coeff;
-
-    int i, j, filt_i, filt_j, src_i, src_j;
-
-    for (i = 0; i < (h + 1) / 2; i++) {
-        /** Vertical pass. */
-        for (j = 0; j < w; j++) {
-            float sum_lo = 0;
-            float sum_hi = 0;
-
-            for (filt_i = 0; filt_i < filt_w; filt_i++) {
-                filt_coeff_lo = filter_lo[filt_i];
-                filt_coeff_hi = filter_hi[filt_i];
-
-                src_i = 2 * i - 1 + filt_i;
-
-                src_i = FFABS(src_i);
-                if (src_i >= h) {
-                    src_i = 2 * h - src_i - 1;
-                }
-
-                img_coeff = src[src_i * src_px_stride + j];
-
-                sum_lo += filt_coeff_lo * img_coeff;
-                sum_hi += filt_coeff_hi * img_coeff;
-            }
-
-            temp_lo[j] = sum_lo;
-            temp_hi[j] = sum_hi;
-        }
-
-        /** Horizontal pass (lo). */
-        for (j = 0; j < (w + 1) / 2; j++) {
-            float sum_lo = 0;
-            float sum_hi = 0;
-
-            for (filt_j = 0; filt_j < filt_w; filt_j++) {
-                filt_coeff_lo = filter_lo[filt_j];
-                filt_coeff_hi = filter_hi[filt_j];
-
-                src_j = 2 * j - 1 + filt_j;
-
-                src_j = FFABS(src_j);
-                if (src_j >= w) {
-                    src_j = 2 * w - src_j - 1;
-                }
-
-                img_coeff = temp_lo[src_j];
-
-                sum_lo += filt_coeff_lo * img_coeff;
-                sum_hi += filt_coeff_hi * img_coeff;
-            }
-
-            dst->band_a[i * dst_px_stride + j] = sum_lo;
-            dst->band_v[i * dst_px_stride + j] = sum_hi;
-        }
-
-        /** Horizontal pass (hi). */
-        for (j = 0; j < (w + 1) / 2; j++) {
-            float sum_lo = 0;
-            float sum_hi = 0;
-
-            for (filt_j = 0; filt_j < filt_w; filt_j++) {
-                filt_coeff_lo = filter_lo[filt_j];
-                filt_coeff_hi = filter_hi[filt_j];
-
-                src_j = 2 * j - 1 + filt_j;
-
-                src_j = FFABS(src_j);
-                if (src_j >= w) {
-                    src_j = 2 * w - src_j - 1;
-                }
-
-                img_coeff = temp_hi[src_j];
-
-                sum_lo += filt_coeff_lo * img_coeff;
-                sum_hi += filt_coeff_hi * img_coeff;
-            }
-
-            dst->band_h[i * dst_px_stride + j] = sum_lo;
-            dst->band_d[i * dst_px_stride + j] = sum_hi;
-        }
-    }
-
+#define adm_dwt2_fn(type, bits) \
+    static void adm_dwt2_##bits##bit(const type *src, const adm_dwt_band_t *dst, int w, int h, \
+                                     ptrdiff_t src_stride, ptrdiff_t dst_stride, int *temp_lo, \
+                                     int* temp_hi) \
+{ \
+    const int *filter_lo = dwt2_db2_coeffs_lo_int; \
+    const int *filter_hi = dwt2_db2_coeffs_hi_int; \
+    int filt_w = sizeof(dwt2_db2_coeffs_lo_int) / sizeof(int); \
+    \
+    ptrdiff_t src_px_stride = src_stride / sizeof(type); \
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(int); \
+    \
+    int filt_coeff_lo, filt_coeff_hi, img_coeff; \
+    \
+    int i, j, filt_i, filt_j, src_i, src_j; \
+    \
+    for (i = 0; i < (h + 1) / 2; i++) { \
+        /** Vertical pass. */ \
+        for (j = 0; j < w; j++) { \
+            int sum_lo = 0; \
+            int sum_hi = 0; \
+            \
+            for (filt_i = 0; filt_i < filt_w; filt_i++) { \
+                filt_coeff_lo = filter_lo[filt_i]; \
+                filt_coeff_hi = filter_hi[filt_i]; \
+                \
+                src_i = 2 * i - 1 + filt_i; \
+                \
+                src_i = FFABS(src_i); \
+                if (src_i >= h) { \
+                    src_i = 2 * h - src_i - 1; \
+                } \
+                \
+                img_coeff = src[src_i * src_px_stride + j]; \
+                \
+                sum_lo += filt_coeff_lo * img_coeff; \
+                sum_hi += filt_coeff_hi * img_coeff; \
+            } \
+            \
+            temp_lo[j] = sum_lo >> N; \
+            temp_hi[j] = sum_hi >> N; \
+        } \
+        \
+        /** Horizontal pass (lo). */ \
+        for (j = 0; j < (w + 1) / 2; j++) { \
+            int sum_lo = 0; \
+            int sum_hi = 0; \
+            \
+            for (filt_j = 0; filt_j < filt_w; filt_j++) { \
+                filt_coeff_lo = filter_lo[filt_j]; \
+                filt_coeff_hi = filter_hi[filt_j]; \
+                \
+                src_j = 2 * j - 1 + filt_j; \
+                \
+                src_j = FFABS(src_j); \
+                if (src_j >= w) { \
+                    src_j = 2 * w - src_j - 1; \
+                } \
+                \
+                img_coeff = temp_lo[src_j]; \
+                \
+                sum_lo += filt_coeff_lo * img_coeff; \
+                sum_hi += filt_coeff_hi * img_coeff; \
+            } \
+            \
+            dst->band_a[i * dst_px_stride + j] = sum_lo >> N; \
+            dst->band_v[i * dst_px_stride + j] = sum_hi >> N; \
+        } \
+        \
+        /** Horizontal pass (hi). */ \
+        for (j = 0; j < (w + 1) / 2; j++) { \
+            int sum_lo = 0; \
+            int sum_hi = 0; \
+            \
+            for (filt_j = 0; filt_j < filt_w; filt_j++) { \
+                filt_coeff_lo = filter_lo[filt_j]; \
+                filt_coeff_hi = filter_hi[filt_j]; \
+                \
+                src_j = 2 * j - 1 + filt_j; \
+                \
+                src_j = FFABS(src_j); \
+                if (src_j >= w) { \
+                    src_j = 2 * w - src_j - 1; \
+                } \
+                \
+                img_coeff = temp_hi[src_j]; \
+                \
+                sum_lo += filt_coeff_lo * img_coeff; \
+                sum_hi += filt_coeff_hi * img_coeff; \
+            } \
+            \
+            dst->band_h[i * dst_px_stride + j] = sum_lo >> N; \
+            dst->band_d[i * dst_px_stride + j] = sum_hi >> N; \
+        } \
+    } \
 }
+
+adm_dwt2_fn(uint8_t, 8);
+adm_dwt2_fn(uint16_t, 10);
+adm_dwt2_fn(int, 32);
 
 static void adm_buffer_copy(const void *src, void *dst, int linewidth, int h,
                             ptrdiff_t src_stride, ptrdiff_t dst_stride)
@@ -417,28 +416,28 @@ static void adm_buffer_copy(const void *src, void *dst, int linewidth, int h,
 
 static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
 {
-    band->band_a = (float *) data_top;
+    band->band_a = (int *) data_top;
     data_top += buf_sz;
-    band->band_h = (float *) data_top;
+    band->band_h = (int *) data_top;
     data_top += buf_sz;
-    band->band_v = (float *) data_top;
+    band->band_v = (int *) data_top;
     data_top += buf_sz;
-    band->band_d = (float *) data_top;
+    band->band_d = (int *) data_top;
     data_top += buf_sz;
     return data_top;
 }
 
-int compute_adm2(const float *ref, const float *main, int w, int h,
+int compute_adm2(const void *ref, const void *main, int w, int h,
                  ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 float *data_buf, float *temp_lo, float* temp_hi)
+                 int *data_buf, int *temp_lo, int *temp_hi, uint8_t type)
 {
     double numden_limit = 1e-2 * (w * h) / (1920.0 * 1080.0);
 
     char *data_top;
 
-    float *ref_scale;
-    float *main_scale;
+    int *ref_scale;
+    int *main_scale;
 
     adm_dwt_band_t ref_dwt2;
     adm_dwt_band_t main_dwt2;
@@ -450,18 +449,18 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
     adm_dwt_band_t csf_r;
     adm_dwt_band_t csf_a;
 
-    float *mta;
+    int *mta;
 
     adm_dwt_band_t cm_r;
 
-    const float *curr_ref_scale = (float *) ref;
-    const float *curr_main_scale = (float *) main;
+    const void *curr_ref_scale = ref;
+    const void *curr_main_scale = main;
     ptrdiff_t curr_ref_stride = ref_stride;
     ptrdiff_t curr_main_stride = main_stride;
 
     int orig_h = h;
 
-    ptrdiff_t buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(float));
+    ptrdiff_t buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(int));
     size_t buf_sz = (size_t)buf_stride * ((h + 1) / 2);
 
     double num = 0;
@@ -472,9 +471,9 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
 
     data_top = (char *) (data_buf);
 
-    ref_scale = (float *) data_top;
+    ref_scale = (int *) data_top;
     data_top += buf_sz;
-    main_scale = (float *) data_top;
+    main_scale = (int *) data_top;
     data_top += buf_sz;
 
     data_top = init_dwt_band(&ref_dwt2, data_top, buf_sz);
@@ -485,7 +484,7 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
     data_top = init_dwt_band(&csf_r, data_top, buf_sz);
     data_top = init_dwt_band(&csf_a, data_top, buf_sz);
 
-    mta = (float *) data_top;
+    mta = (int *) data_top;
     data_top += buf_sz;
 
     data_top = init_dwt_band(&cm_r, data_top, buf_sz);
@@ -494,10 +493,24 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
         float num_scale = 0.0;
         float den_scale = 0.0;
 
-        adm_dwt2(curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride,
-                 temp_lo, temp_hi);
-        adm_dwt2(curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride,
-                 temp_lo, temp_hi);
+        if(!scale) {
+            if(type <= 8) {
+                adm_dwt2_8bit((const uint8_t *) curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride,
+                              temp_lo, temp_hi);
+                adm_dwt2_8bit((const uint8_t *) curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride,
+                              temp_lo, temp_hi);
+            } else {
+                adm_dwt2_10bit((const uint16_t *) curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride,
+                               temp_lo, temp_hi);
+                adm_dwt2_10bit((const uint16_t *) curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride,
+                               temp_lo, temp_hi);
+            }
+        } else{
+            adm_dwt2_32bit((const int *) curr_ref_scale, &ref_dwt2, w, h, curr_ref_stride, buf_stride,
+                           temp_lo, temp_hi);
+            adm_dwt2_32bit((const int *) curr_main_scale, &main_dwt2, w, h, curr_main_stride, buf_stride,
+                           temp_lo, temp_hi);
+        }
 
         w = (w + 1) / 2;
         h = (h + 1) / 2;
@@ -523,9 +536,9 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
         num += num_scale;
         den += den_scale;
 
-        adm_buffer_copy(ref_dwt2.band_a, ref_scale, w * sizeof(float), h,
+        adm_buffer_copy(ref_dwt2.band_a, ref_scale, w * sizeof(int), h,
                         buf_stride, buf_stride);
-        adm_buffer_copy(main_dwt2.band_a, main_scale, w * sizeof(float), h,
+        adm_buffer_copy(main_dwt2.band_a, main_scale, w * sizeof(int), h,
                         buf_stride, buf_stride);
 
         curr_ref_scale = ref_scale;
@@ -533,15 +546,15 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
         curr_ref_stride = buf_stride;
         curr_main_stride = buf_stride;
 
-        scores[2*scale+0] = num_scale;
-        scores[2*scale+1] = den_scale;
+        scores[2 * scale + 0] = num_scale;
+        scores[2 * scale + 1] = den_scale;
     }
 
     num = num < numden_limit ? 0 : num;
     den = den < numden_limit ? 0 : den;
 
     if (den == 0.0) {
-        *score = 1.0f;
+        *score = 1.0;
     } else {
         *score = num / den;
     }
@@ -552,37 +565,6 @@ int compute_adm2(const float *ref, const float *main, int w, int h,
 
     return ret;
 }
-
-#define offset_fn(type, bits) \
-    static void offset_##bits##bit(ADMContext *s, const AVFrame *ref, AVFrame *main, int stride) \
-{ \
-    int w = s->width; \
-    int h = s->height; \
-    int i,j; \
-    \
-    ptrdiff_t ref_stride = ref->linesize[0]; \
-    ptrdiff_t main_stride = main->linesize[0]; \
-    \
-    const type *ref_ptr = (const type *) ref->data[0]; \
-    const type *main_ptr = (const type *) main->data[0]; \
-    \
-    float *ref_ptr_data = s->ref_data; \
-    float *main_ptr_data = s->main_data; \
-    \
-    for(i = 0; i < h; i++) { \
-        for(j = 0; j < w; j++) { \
-            ref_ptr_data[j] = (float) ref_ptr[j]; \
-            main_ptr_data[j] = (float) main_ptr[j]; \
-        } \
-        ref_ptr += ref_stride / sizeof(type); \
-        ref_ptr_data += stride / sizeof(float); \
-        main_ptr += main_stride / sizeof(type); \
-        main_ptr_data += stride / sizeof(float); \
-    } \
-}
-
-offset_fn(uint8_t, 8);
-offset_fn(uint16_t, 10);
 
 static void set_meta(AVDictionary **metadata, const char *key, float d)
 {
@@ -604,20 +586,14 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int w = s->width;
     int h = s->height;
 
-    ptrdiff_t stride;
+    ptrdiff_t ref_stride, main_stride;
 
-    stride = ALIGN_CEIL(w * sizeof(float));
+    ref_stride = ref->linesize[0];
+    main_stride = main->linesize[0];
 
-    /** Offset ref and main pixels by OPT_RANGE_PIXEL_OFFSET */
-    if (s->desc->comp[0].depth <= 8) {
-        offset_8bit(s, ref, main, stride);
-    } else {
-        offset_10bit(s, ref, main, stride);
-    }
-
-    compute_adm2(s->ref_data, s->main_data, w, h, stride, stride, &score,
+    compute_adm2(ref->data[0], main->data[0], w, h, ref_stride, main_stride, &score,
                  &score_num, &score_den, scores, s->data_buf, s->temp_lo,
-                 s->temp_hi);
+                 s->temp_hi, s->desc->comp[0].depth);
 
     set_meta(metadata, "lavfi.adm.score", score);
 
@@ -631,6 +607,12 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 static av_cold int init(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
+
+    int i;
+    for(i = 0; i < 4; i++) {
+        dwt2_db2_coeffs_lo_int[i] = lrint(dwt2_db2_coeffs_lo[i] * (1 << N));
+        dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << N));
+    }
 
     s->dinput.process = do_adm;
 
@@ -658,7 +640,6 @@ static int config_input_ref(AVFilterLink *inlink)
     ptrdiff_t buf_stride;
     size_t buf_sz;
     ptrdiff_t stride;
-    size_t data_sz;
 
     if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
         ctx->inputs[0]->h != ctx->inputs[1]->h) {
@@ -674,24 +655,11 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    stride = ALIGN_CEIL(s->width * sizeof(float));
-    data_sz = (size_t)stride * s->height;
-
-    if (!(s->ref_data = av_malloc(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "ref data allocation failed.\n");
-        return AVERROR(ENOMEM);
-    }
-
-    if (!(s->main_data = av_malloc(data_sz))) {
-        av_log(ctx, AV_LOG_ERROR, "main data allocation failed.\n");
-        return AVERROR(ENOMEM);
-    }
-
-    buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(float));
+    buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(int));
     buf_sz = (size_t)buf_stride * ((s->height + 1) / 2);
 
     if (SIZE_MAX / buf_sz < 35) {
-        av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz_one < 35, buf_sz_one = %lu.\n", buf_sz);
+        av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz_one < 35");
         return AVERROR(EINVAL);
     }
 
@@ -699,6 +667,7 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
+    stride = ALIGN_CEIL(s->width * sizeof(int));
     if (!(s->temp_lo = av_malloc(stride))) {
         return AVERROR(ENOMEM);
     }
@@ -749,8 +718,6 @@ static av_cold void uninit(AVFilterContext *ctx)
         av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", s->adm_sum / s->nb_frames);
     }
 
-    av_free(s->ref_data);
-    av_free(s->main_data);
     av_free(s->data_buf);
     av_free(s->temp_lo);
     av_free(s->temp_hi);

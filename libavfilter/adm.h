@@ -30,10 +30,10 @@
 #define N 15
 
 typedef struct adm_dwt_band_t {
-    float *band_a; /** Low-pass V + low-pass H. */
-    float *band_v; /** Low-pass V + high-pass H. */
-    float *band_h; /** High-pass V + low-pass H. */
-    float *band_d; /** High-pass V + high-pass H. */
+    int *band_a; /** Low-pass V + low-pass H. */
+    int *band_v; /** Low-pass V + high-pass H. */
+    int *band_h; /** High-pass V + low-pass H. */
+    int *band_d; /** High-pass V + high-pass H. */
 } adm_dwt_band_t;
 
 /**
@@ -55,6 +55,9 @@ struct dwt_model_params {
 
 static const float dwt2_db2_coeffs_lo[4] = {  0.482962913144690,  0.836516303737469, 0.224143868041857, -0.129409522550921 };
 static const float dwt2_db2_coeffs_hi[4] = { -0.129409522550921, -0.224143868041857, 0.836516303737469, -0.482962913144690 };
+
+static int dwt2_db2_coeffs_lo_int[4];
+static int dwt2_db2_coeffs_hi_int[4];
 
 /** 0 -> Y, 1 -> Cb, 2 -> Cr */
 static const struct dwt_model_params dwt_7_9_YCbCr_threshold[3] = {
@@ -82,9 +85,9 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
 };
 
 /** function to compute adm score */
-int compute_adm2(const float *ref, const float *main, int w, int h,
+int compute_adm2(const void *ref, const void *main, int w, int h,
                  ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 float *data_buf, float *temp_lo, float* temp_hi);
+                 int *data_buf, int *temp_lo, int* temp_hi, uint8_t type);
 
 #endif /* AVFILTER_ADM_H */

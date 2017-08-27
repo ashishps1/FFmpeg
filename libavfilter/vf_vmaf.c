@@ -50,29 +50,24 @@ typedef struct VMAFContext {
     double score_num;
     double score_den;
     int conv_filter[5];
-    float *ref_data;
-    float *main_data;
-    float *adm_data_buf;
-    float *adm_temp_lo;
-    float *adm_temp_hi;
+    int vif_filter[4][17];
+    int *adm_data_buf;
+    int *adm_temp_lo;
+    int *adm_temp_hi;
     uint16_t *prev_blur_data;
     uint16_t *blur_data;
     uint16_t *temp_data;
-    float *vif_data_buf;
-    float *vif_temp;
+    uint64_t *vif_data_buf;
+    uint64_t *vif_temp;
     double prev_motion_score;
     double vmaf_score;
     uint64_t nb_frames;
     char *model_path;
-    char *log_path;
-    char *log_fmt;
     int enable_transform;
-    int phone_model;
     char *pool;
     svm_model *svm_model_ptr;
     svm_node* nodes;
     void (*pool_method)(double *score, double curr);
-    double prediction;
 } VMAFContext;
 
 #define OFFSET(x) offsetof(VMAFContext, x)
@@ -80,10 +75,7 @@ typedef struct VMAFContext {
 
 static const AVOption vmaf_options[] = {
     {"model_path",  "Set the model to be used for computing vmaf.",                     OFFSET(model_path), AV_OPT_TYPE_STRING, {.str="libavfilter/data/vmaf_v0.6.1.pkl.model"}, 0, 1, FLAGS},
-    {"log_path",  "Set the file path to be used to store logs.",                        OFFSET(log_path), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
-    {"log_fmt",  "Set the format of the log (xml or json).",                            OFFSET(log_fmt), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 1, FLAGS},
     {"enable_transform",  "Enables transform for computing vmaf.",                      OFFSET(enable_transform), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
-    {"phone_model",  "Invokes the phone model that will generate higher VMAF scores.",  OFFSET(phone_model), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS},
     {"pool",  "Set the pool method to be used for computing vmaf.",                     OFFSET(pool), AV_OPT_TYPE_STRING, {.str="mean"}, 0, 1, FLAGS},
     { NULL }
 };
@@ -171,10 +163,10 @@ static double k_function(const svm_node *x, const svm_node *y,
                   }
         case SIGMOID:
                   return tanh(param->gamma * dot(x, y) + param->coef0);
-        case PRECOMPUTED:  //x: test (validation), y: SV
+        case PRECOMPUTED:
                   return x[(int)(y->value)].value;
         default:
-                  return 0;  // Unreachable
+                  return 0;
     }
 }
 
@@ -429,7 +421,7 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         return NULL;
     }
 
-    // read parameters
+    /** read parameters */
     model = Malloc(svm_model,1);
     model->rho = NULL;
     model->probA = NULL;
@@ -438,7 +430,7 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
     model->label = NULL;
     model->nSV = NULL;
 
-    // read header
+    /** read header */
     if (!read_model_header(fp, model, ctx)) {
         av_log(ctx, AV_LOG_ERROR, "ERROR: fscanf failed to read model\n");
         av_free(model->rho);
@@ -448,7 +440,7 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         return NULL;
     }
 
-    // read sv_coef and SV
+    /** read sv_coef and SV */
     elements = 0;
     pos = ftell(fp);
 
@@ -578,69 +570,40 @@ static void harmonic_mean(double *score, double curr)
     *score += 1.0 / (curr + 1.0);
 }
 
-#define offset_fn(type, bits) \
-    static void offset_##bits##bit(VMAFContext *s, const AVFrame *ref, AVFrame *main, int stride) \
-{ \
-    int w = s->width; \
-    int h = s->height; \
-    int i,j; \
-    \
-    ptrdiff_t ref_stride = ref->linesize[0]; \
-    ptrdiff_t main_stride = main->linesize[0]; \
-    \
-    const type *ref_ptr = (const type *) ref->data[0]; \
-    const type *main_ptr = (const type *) main->data[0]; \
-    \
-    float *ref_ptr_data = s->ref_data; \
-    float *main_ptr_data = s->main_data; \
-    \
-    for(i = 0; i < h; i++) { \
-        for(j = 0; j < w; j++) { \
-            ref_ptr_data[j] = (float) ref_ptr[j]; \
-            main_ptr_data[j] = (float) main_ptr[j]; \
-        } \
-        ref_ptr += ref_stride / sizeof(type); \
-        ref_ptr_data += stride / sizeof(float); \
-        main_ptr += main_stride / sizeof(type); \
-        main_ptr_data += stride / sizeof(float); \
-    } \
+static void set_meta(AVDictionary **metadata, const char *key, float d)
+{
+    char value[128];
+    snprintf(value, sizeof(value), "%0.2f", d);
+    av_dict_set(metadata, key, value, 0);
 }
-
-offset_fn(uint8_t, 8);
-offset_fn(uint16_t, 10);
 
 static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
 {
     VMAFContext *s = (VMAFContext *) ctx;
+    AVDictionary **metadata = &main->metadata;
 
     size_t motion_data_sz;
     int i,j;
     ptrdiff_t ref_stride;
+    ptrdiff_t main_stride;
     ptrdiff_t ref_px_stride;
-    ptrdiff_t stride;
     ptrdiff_t motion_stride;
     ptrdiff_t motion_px_stride;
     int w = s->width;
     int h = s->height;
-
+    double prediction;
+    
     ref_stride = ref->linesize[0];
+    main_stride = main->linesize[0];
 
-    stride = ALIGN_CEIL(w * sizeof(float));
     motion_stride = ALIGN_CEIL(w * sizeof(uint16_t));
     motion_px_stride = motion_stride / sizeof(uint16_t);
 
-    /** Offset ref and main pixel by OPT_RANGE_PIXEL_OFFSET */
-    if (s->desc->comp[0].depth <= 8) {
-        offset_8bit(s, ref, main, stride);
-    } else {
-        offset_10bit(s, ref, main, stride);
-    }
-
     motion_data_sz = (size_t)motion_stride * s->height;
 
-    compute_adm2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
-                 &s->score_num, &s->score_den, s->scores, s->adm_data_buf,
-                 s->adm_temp_lo, s->adm_temp_hi);
+    compute_adm2(ref->data[0], main->data[0], w, h, ref_stride, main_stride, &s->score,
+                 &s->score_num, &s->score_den, s->scores, s->adm_data_buf, s->adm_temp_lo,
+                 s->adm_temp_hi, s->desc->comp[0].depth);
     s->nodes[0].index = 1;
     s->nodes[0].value = (double)(slopes[1]) * (double)(s->score_num / s->score_den) + (double)(intercepts[1]);
 
@@ -669,10 +632,9 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     s->nodes[1].value = (double)(slopes[2]) * (double)FFMIN(s->prev_motion_score, s->score) + (double)(intercepts[2]);
     s->prev_motion_score = s->score;
 
-    compute_vif2(s->ref_data, s->main_data, w, h, stride, stride, &s->score,
-                 &s->score_num, &s->score_den, s->scores, s->vif_data_buf,
-                 s->vif_temp);
-
+    compute_vif2(s->vif_filter, ref->data[0], main->data[0], w, h, ref_stride,
+                 main_stride, &s->score, &s->score_num, &s->score_den, s->scores,
+                 s->vif_data_buf, s->vif_temp, s->desc->comp[0].depth);
     j = 0;
     for(i = 0; j < 4; i += 2) {
         s->nodes[j+2].index = j+3;
@@ -680,31 +642,34 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
         j++;
     }
 
-    s->prediction = svm_predict(s->svm_model_ptr, s->nodes);
+    prediction = svm_predict(s->svm_model_ptr, s->nodes);
 
     if (!av_strcasecmp(norm_type, "linear_rescale")) {
         /** denormalize */
-        s->prediction = (s->prediction - (double)(intercepts[0])) / (double)(slopes[0]);
+        prediction = (prediction - (double)(intercepts[0])) / (double)(slopes[0]);
     }
 
-    /* score transform */
+    /** score transform */
     if (s->enable_transform) {
         double value = 0.0;
 
-        /* quadratic transform */
+        /** quadratic transform */
         value += (double)(score_transform[0]);
-        value += (double)(score_transform[1]) * s->prediction;
-        value += (double)(score_transform[2]) * s->prediction * s->prediction;
+        value += (double)(score_transform[1]) * prediction;
+        value += (double)(score_transform[2]) * prediction * prediction;
 
-        /* rectification */
-        if (value < s->prediction) {
-            value = s->prediction;
+        /** rectification */
+        if (value < prediction) {
+            value = prediction;
         }
 
-        s->prediction = value;
+        prediction = value;
     }
 
-    s->pool_method(&s->vmaf_score, s->prediction);
+    s->pool_method(&s->vmaf_score, prediction);
+    
+    set_meta(metadata, "lavfi.vmaf.score", prediction);
+        
     return 0;
 }
 
@@ -727,6 +692,10 @@ static av_cold int init(AVFilterContext *ctx)
         int i;
         for(i = 0; i < 5; i++) {
             s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
+        }
+        for(i = 0; i < 4; i++) {
+            dwt2_db2_coeffs_lo_int[i] = lrint(dwt2_db2_coeffs_lo[i] * (1 << N));
+            dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << N));
         }
 
         s->svm_model_ptr = svm_load_model(s->model_path, ctx);
@@ -787,19 +756,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-
-    stride = ALIGN_CEIL(s->width * sizeof(float));
-    data_sz = (size_t)stride * s->height;
-
-    if (!(s->ref_data = av_malloc(data_sz))) {
-        return AVERROR(ENOMEM);
-    }
-
-    if (!(s->main_data = av_malloc(data_sz))) {
-        return AVERROR(ENOMEM);
-    }
-
-    adm_buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(float));
+    adm_buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(int));
     adm_buf_sz = (size_t)adm_buf_stride * ((s->height + 1) / 2);
 
     if (SIZE_MAX / adm_buf_sz < 35) {
@@ -810,7 +767,8 @@ static int config_input_ref(AVFilterLink *inlink)
     if (!(s->adm_data_buf = av_malloc(adm_buf_sz * 35))) {
         return AVERROR(ENOMEM);
     }
-
+    
+    stride = ALIGN_CEIL(s->width * sizeof(int));
     if (!(s->adm_temp_lo = av_malloc(stride))) {
         return AVERROR(ENOMEM);
     }
@@ -833,7 +791,7 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
-    vif_buf_stride = ALIGN_CEIL(s->width * sizeof(float));
+    vif_buf_stride = ALIGN_CEIL(s->width * sizeof(uint64_t));
     vif_buf_sz = (size_t)vif_buf_stride * s->height;
 
     if (SIZE_MAX / data_sz < 15) {
@@ -845,7 +803,7 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
-    if (!(s->vif_temp = av_malloc(s->width * sizeof(float)))) {
+    if (!(s->vif_temp = av_malloc(s->width * sizeof(uint64_t)))) {
         return AVERROR(ENOMEM);
     }
 
@@ -899,8 +857,6 @@ static av_cold void uninit(AVFilterContext *ctx)
 
         svm_free_and_destroy_model((svm_model **)&s->svm_model_ptr);
 
-        av_free(s->ref_data);
-        av_free(s->main_data);
         av_free(s->adm_data_buf);
         av_free(s->adm_temp_lo);
         av_free(s->adm_temp_hi);
