@@ -80,7 +80,7 @@ av_always_inline static float dwt_quant_step(const struct dwt_model_params *para
     float r = VIEW_DIST * REF_DISPLAY_HEIGHT * M_PI / 180.0;
 
     /** Formula (9), page 1171 */
-    float temp = log10(pow(2.0, lambda+1) * params->f0 * params->g[theta] / r);
+    float temp = log10(exp2(lambda + 1) * params->f0 * params->g[theta] / r);
     float Q = 2.0 * params->a * pow(10.0, params->k * temp * temp) /
         dwt_7_9_basis_function_amplitudes[lambda][theta];
 
@@ -195,7 +195,7 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 
     float factor1 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 1);
     float factor2 = dwt_quant_step(&dwt_7_9_YCbCr_threshold[0], scale, 2);
-    float rfactor[3] = {1.0 / factor1, 1.0 / factor1, 1.0 / factor2};
+    int rfactor[3] = {lrint((1.0 / factor1) * (1 << N)), lrint((1.0 / factor1) * (1 << N)), lrint((1.0 / factor2) * (1 << N))};
 
     int i, j, theta;
 
@@ -205,8 +205,8 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 
         for (i = 0; i < h; i++) {
             for (j = 0; j < w; j++) {
-                dst_ptr[i * dst_px_stride + j] = rfactor[theta] *
-                    src_ptr[i * src_px_stride + j];
+                dst_ptr[i * dst_px_stride + j] = (rfactor[theta] *
+                    src_ptr[i * src_px_stride + j]) >> N;
             }
         }
     }
@@ -221,7 +221,7 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int *dst, int w, int h,
     ptrdiff_t src_px_stride = src_stride / sizeof(int);
     ptrdiff_t dst_px_stride = dst_stride / sizeof(int);
 
-    float filt_coeff, img_coeff;
+    int filt_coeff, img_coeff;
 
     int theta, i, j, filt_i, filt_j, src_i, src_j;
 
@@ -235,12 +235,11 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int *dst, int w, int h,
             src_ptr = angles[theta];
 
             for (j = 0; j < w; j++) {
-                float sum = 0;
+                int sum = 0;
 
                 for (filt_i = 0; filt_i < 3; filt_i++) {
                     for (filt_j = 0; filt_j < 3; filt_j++) {
-                        filt_coeff = (filt_i == 1 && filt_j == 1) ? 1.0 / 15.0 : 1.0 /
-                            30.0;
+                        filt_coeff = (lrint((filt_i == 1 && filt_j == 1) ? 1.0 / 15.0 : 1.0 / 30.0) * (1 << N));
 
                         src_i = i - 1 + filt_i;
                         src_j = j - 1 + filt_j;
@@ -259,7 +258,7 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int *dst, int w, int h,
                     }
                 }
 
-                dst[i * dst_px_stride + j] += sum;
+                dst[i * dst_px_stride + j] += sum >> N;
             }
         }
     }
