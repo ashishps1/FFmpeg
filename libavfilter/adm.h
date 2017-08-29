@@ -30,10 +30,10 @@
 #define N 15
 
 typedef struct adm_dwt_band_t {
-    int *band_a; /** Low-pass V + low-pass H. */
-    int *band_v; /** Low-pass V + high-pass H. */
-    int *band_h; /** High-pass V + low-pass H. */
-    int *band_d; /** High-pass V + high-pass H. */
+    int32_t *band_a; /** Low-pass V + low-pass H. */
+    int32_t *band_v; /** Low-pass V + high-pass H. */
+    int32_t *band_h; /** High-pass V + low-pass H. */
+    int32_t *band_d; /** High-pass V + high-pass H. */
 } adm_dwt_band_t;
 
 /**
@@ -88,6 +88,6 @@ static const float dwt_7_9_basis_function_amplitudes[6][4] = {
 int compute_adm2(const void *ref, const void *main, int w, int h,
                  ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
-                 int *data_buf, int *temp_lo, int* temp_hi, uint8_t type);
+                 int32_t *data_buf, int32_t *temp_lo, int32_t *temp_hi, uint8_t type);
 
 #endif /* AVFILTER_ADM_H */
