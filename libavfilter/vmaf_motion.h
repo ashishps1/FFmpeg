@@ -24,6 +24,16 @@
 
 #define N 15
 
+#include <stddef.h>
+#include <stdint.h>
+
+typedef struct VMAFMotionDSPContext {
+    uint64_t (*image_sad)(const uint16_t *img1, const uint16_t *img2, int w, int h,
+                            ptrdiff_t img1_stride, ptrdiff_t img2_stride);
+} VMAFMotionDSPContext;
+
+void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp);
+
 static const float FILTER_5[5] = {
     0.054488685,
     0.244201342,

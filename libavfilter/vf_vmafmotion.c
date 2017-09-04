@@ -28,16 +28,16 @@
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "dualinput.h"
 #include "drawutils.h"
 #include "formats.h"
+#include "framesync2.h"
 #include "internal.h"
 #include "vmaf_motion.h"
 #include "video.h"
 
 typedef struct VMAFMotionContext {
     const AVClass *class;
-    FFDualInputContext dinput;
+    FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
     int filter[5];
     int width;
@@ -47,6 +47,7 @@ typedef struct VMAFMotionContext {
     uint16_t *temp_data;
     double motion_sum;
     uint64_t nb_frames;
+    VMAFMotionDSPContext dsp;
 } VMAFMotionContext;
 
 #define MAX_ALIGN 32
@@ -56,9 +57,9 @@ static const AVOption vmafmotion_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(vmafmotion);
+FRAMESYNC_DEFINE_CLASS(vmafmotion, VMAFMotionContext, fs);
 
-static double image_sad(const uint16_t *img1, const uint16_t *img2, int w, int h,
+static uint64_t image_sad(const uint16_t *img1, const uint16_t *img2, int w, int h,
                         ptrdiff_t img1_stride, ptrdiff_t img2_stride)
 {
     uint64_t sum = 0;
@@ -70,7 +71,7 @@ static double image_sad(const uint16_t *img1, const uint16_t *img2, int w, int h
         }
     }
 
-    return (double) (sum * 1.0 / (w * h));
+    return sum;
 }
 
 static inline int floorn(int n, int m)
@@ -150,7 +151,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 } \
                 sum += filter[k] * src[i_tap * src_stride + j]; \
             } \
-            dst[i* dst_stride + j] = sum >> N; \
+            dst[i * dst_stride + j] = sum >> N; \
         } \
     } \
     for (i = borders_top; i < borders_bottom; i++) { \
@@ -159,7 +160,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
             for (k = 0; k < filt_w; k++) { \
                 sum += filter[k] * src[(i - radius + k) * src_stride + j]; \
             } \
-            dst[i* dst_stride + j] = sum >> N; \
+            dst[i * dst_stride + j] = sum >> N; \
         } \
     } \
     for (i = borders_bottom; i < h; i++) { \
@@ -172,7 +173,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 } \
                 sum += filter[k] * src[i_tap * src_stride + j]; \
             } \
-            dst[i* dst_stride + j] = sum >> N; \
+            dst[i * dst_stride + j] = sum >> N; \
         } \
     } \
 }
@@ -198,8 +199,9 @@ void convolution_f32(const int *filter, int filt_w, const void *src,
 int compute_vmafmotion(const uint16_t *ref, const uint16_t *main, int w, int h,
                        ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score)
 {
-    *score = image_sad(ref, main, w, h, ref_stride / sizeof(uint16_t),
+    uint64_t sad = image_sad(ref, main, w, h, ref_stride / sizeof(uint16_t),
                        main_stride / sizeof(uint16_t));
+    *score = (double) (sad * 1.0 / (w * h));
 
     return 0;
 }
@@ -211,16 +213,27 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata, key, value, 0);
 }
 
-static AVFrame *do_vmafmotion(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static int do_vmafmotion(FFFrameSync *fs)
 {
+    AVFilterContext *ctx = fs->parent;
     VMAFMotionContext *s = ctx->priv;
-    AVDictionary **metadata = &main->metadata;
+    AVFrame *main, *ref;
+    AVDictionary **metadata;
+    int ret;
     ptrdiff_t ref_stride;
     ptrdiff_t ref_px_stride;
     ptrdiff_t stride;
     ptrdiff_t px_stride;
     size_t data_sz;
     double score;
+
+    ret = ff_framesync2_dualinput_get(fs, &main, &ref);
+    if (ret < 0)
+        return ret;
+    if (!ref)
+        return ff_filter_frame(ctx->outputs[0], main);
+
+    metadata = &main->metadata;
 
     ref_stride = ref->linesize[0];
     stride = ALIGN_CEIL(s->width * sizeof(uint16_t));
@@ -254,7 +267,7 @@ static AVFrame *do_vmafmotion(AVFilterContext *ctx, AVFrame *main, const AVFrame
 
     s->motion_sum += score;
 
-    return main;
+    return ff_filter_frame(ctx->outputs[0], main);
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -266,7 +279,7 @@ static av_cold int init(AVFilterContext *ctx)
         s->filter[i] = lrint(FILTER_5[i] * (1 << N));
     }
 
-    s->dinput.process = do_vmafmotion;
+    s->fs.on_event = do_vmafmotion;
 
     return 0;
 }
@@ -319,6 +332,10 @@ static int config_input_ref(AVFilterLink *inlink)
         return AVERROR(ENOMEM);
     }
 
+    s->dsp.image_sad = image_sad;
+    if (ARCH_X86)
+        ff_vmafmotion_init_x86(&s->dsp);
+
     return 0;
 }
 
@@ -329,32 +346,31 @@ static int config_output(AVFilterLink *outlink)
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
 
+    ret = ff_framesync2_init_dualinput(&s->fs, ctx);
+    if (ret < 0)
+        return ret;
     outlink->w = mainlink->w;
     outlink->h = mainlink->h;
     outlink->time_base = mainlink->time_base;
     outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
     outlink->frame_rate = mainlink->frame_rate;
-    if ((ret = ff_dualinput_init(ctx, &s->dinput)) < 0)
+    if ((ret = ff_framesync2_configure(&s->fs)) < 0)
         return ret;
-
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
+static int activate(AVFilterContext *ctx)
 {
-    VMAFMotionContext *s = inlink->dst->priv;
-    return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
+    VMAFMotionContext *s = ctx->priv;
+    return ff_framesync2_activate(&s->fs);
 }
 
-static int request_frame(AVFilterLink *outlink)
-{
-    VMAFMotionContext *s = outlink->src->priv;
-    return ff_dualinput_request_frame(&s->dinput, outlink);
-}
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFMotionContext *s = ctx->priv;
+
+    ff_framesync2_uninit(&s->fs);
 
     if (s->nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "VMAF Motion avg: %.3f\n", s->motion_sum / s->nb_frames);
@@ -363,19 +379,15 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_free(s->prev_blur_data);
     av_free(s->blur_data);
     av_free(s->temp_data);
-
-    ff_dualinput_uninit(&s->dinput);
 }
 
 static const AVFilterPad vmafmotion_inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
     },{
         .name         = "reference",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
         .config_props = config_input_ref,
     },
     { NULL }
@@ -386,17 +398,17 @@ static const AVFilterPad vmafmotion_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_output,
-        .request_frame = request_frame,
     },
     { NULL }
 };
 
 AVFilter ff_vf_vmafmotion = {
     .name          = "vmafmotion",
-    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF Motion between two video streams."),
+    .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF Motion score between two video streams."),
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
+    .activate      = activate,
     .priv_size     = sizeof(VMAFMotionContext),
     .priv_class    = &vmafmotion_class,
     .inputs        = vmafmotion_inputs,
