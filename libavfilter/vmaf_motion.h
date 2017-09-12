@@ -36,12 +36,14 @@ typedef struct VMAFMotionDSPContext {
                           ptrdiff_t dst_stride);
     void (*convolution_y_10bit)(const int *filter, int filt_w, const uint16_t *src,
                           uint16_t *dst, int w, int h, ptrdiff_t src_stride,
-                          ptrdiff_t dst_stride);                                                    
+                          ptrdiff_t dst_stride);
 } VMAFMotionDSPContext;
 
 void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp);
 
-int compute_vmafmotion(const int *filter, int filt_w, void *src, uint16_t *temp_data, const uint16_t *ref, uint16_t *main, int w, int h,
-                       ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,  ptrdiff_t src_stride, uint8_t bitdepth);
+int compute_vmafmotion(const int *filter, int filt_w, void *src,
+                       uint16_t *temp_data, const uint16_t *ref, uint16_t *main,
+                       int w, int h, ptrdiff_t ref_stride, ptrdiff_t main_stride,
+                       double *score,  ptrdiff_t src_stride, uint8_t bitdepth);
 
 #endif /* AVFILTER_VMAFMOTION_H */
