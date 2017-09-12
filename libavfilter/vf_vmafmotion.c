@@ -52,7 +52,7 @@ typedef struct VMAFMotionContext {
 
 #define MAX_ALIGN 32
 #define vmafmotion_options NULL
-#define N 10
+#define BIT_SHIFT 10
 
 static const float FILTER_5[5] = {
     0.054488685,
@@ -101,7 +101,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 }
                 sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j_tap];
             }
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT;
         }
 
         for (j = borders_left; j < borders_right; j++) {
@@ -109,7 +109,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
             for (k = 0; k < filt_w; k++) {
                 sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j - radius + k];
             }
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT;
         }
 
         for (j = borders_right; j < w; j++) {
@@ -121,7 +121,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 }
                 sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j_tap];
             }
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT;
         }
     }
 }
@@ -148,7 +148,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 } \
                 sum += filter[k] * src[i_tap * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT; \
         } \
     } \
     for (i = borders_top; i < borders_bottom; i++) { \
@@ -157,7 +157,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
             for (k = 0; k < filt_w; k++) { \
                 sum += filter[k] * src[(i - radius + k) * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT; \
         } \
     } \
     for (i = borders_bottom; i < h; i++) { \
@@ -170,7 +170,7 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 } \
                 sum += filter[k] * src[i_tap * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> BIT_SHIFT; \
         } \
     } \
 }
@@ -255,7 +255,7 @@ static av_cold int init(AVFilterContext *ctx)
 
     int i;
     for(i = 0; i < 5; i++) {
-        s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
+        s->conv_filter[i] = lrint(FILTER_5[i] * (1 << BIT_SHIFT));
     }
 
     s->fs.on_event = do_vmafmotion;
