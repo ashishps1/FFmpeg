@@ -39,7 +39,7 @@ typedef struct VMAFMotionContext {
     const AVClass *class;
     FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
-    int filter[5];
+    int conv_filter[5];
     int width;
     int height;
     uint16_t *prev_blur_data;
@@ -51,37 +51,34 @@ typedef struct VMAFMotionContext {
 } VMAFMotionContext;
 
 #define MAX_ALIGN 32
-#define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
+#define vmafmotion_options NULL
+#define N 10
 
-static const AVOption vmafmotion_options[] = {
-    { NULL }
+static const float FILTER_5[5] = {
+    0.054488685,
+    0.244201342,
+    0.402619947,
+    0.244201342,
+    0.054488685
 };
 
 FRAMESYNC_DEFINE_CLASS(vmafmotion, VMAFMotionContext, fs);
 
-static uint64_t image_sad(const uint16_t *img1, const uint16_t *img2, int w, int h,
-                        ptrdiff_t img1_stride, ptrdiff_t img2_stride)
+static uint64_t image_sad(const uint16_t *img1, const uint16_t *img2, int w,
+                          int h, ptrdiff_t img1_stride, ptrdiff_t img2_stride)
 {
     uint64_t sum = 0;
     int i, j;
 
     for (i = 0; i < h; i++) {
         for (j = 0; j < w; j++) {
-            sum += abs(img1[i * img1_stride + j] - img2[i * img2_stride + j]);
+            sum += abs(img1[j] - img2[j]);
         }
+        img1 += img1_stride / sizeof(uint16_t);
+        img2 += img2_stride / sizeof(uint16_t);
     }
 
     return sum;
-}
-
-static inline int floorn(int n, int m)
-{
-    return n - n % m;
-}
-
-static inline int ceiln(int n, int m)
-{
-    return n % m ? n + (m - n % m) : n;
 }
 
 static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
@@ -89,8 +86,8 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                           ptrdiff_t dst_stride)
 {
     int radius = filt_w / 2;
-    int borders_left = ceiln(radius, 1);
-    int borders_right = floorn(w - (filt_w - radius), 1);
+    int borders_left = radius;
+    int borders_right = w - (filt_w - radius);
     int i, j, k;
     int sum = 0;
 
@@ -102,17 +99,17 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 if (j_tap >= w) {
                     j_tap = w - (j_tap - w + 1);
                 }
-                sum += filter[k] * src[i * src_stride + j_tap];
+                sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j_tap];
             }
-            dst[i * dst_stride + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
         }
 
         for (j = borders_left; j < borders_right; j++) {
             int sum = 0;
             for (k = 0; k < filt_w; k++) {
-                sum += filter[k] * src[i * src_stride + j - radius + k];
+                sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j - radius + k];
             }
-            dst[i * dst_stride + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
         }
 
         for (j = borders_right; j < w; j++) {
@@ -122,9 +119,9 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 if (j_tap >= w) {
                     j_tap = w - (j_tap - w + 1);
                 }
-                sum += filter[k] * src[i * src_stride + j_tap];
+                sum += filter[k] * src[i * src_stride / sizeof(uint16_t) + j_tap];
             }
-            dst[i * dst_stride + j] = sum >> N;
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N;
         }
     }
 }
@@ -136,8 +133,8 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                                           ptrdiff_t dst_stride) \
 { \
     int radius = filt_w / 2; \
-    int borders_top = ceiln(radius, 1); \
-    int borders_bottom = floorn(h - (filt_w - radius), 1); \
+    int borders_top = radius; \
+    int borders_bottom = h - (filt_w - radius); \
     int i, j, k; \
     int sum = 0; \
     \
@@ -149,18 +146,18 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 if (i_tap >= h) { \
                     i_tap = h - (i_tap - h + 1); \
                 } \
-                sum += filter[k] * src[i_tap * src_stride + j]; \
+                sum += filter[k] * src[i_tap * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
         } \
     } \
     for (i = borders_top; i < borders_bottom; i++) { \
         for (j = 0; j < w; j++) { \
             sum = 0; \
             for (k = 0; k < filt_w; k++) { \
-                sum += filter[k] * src[(i - radius + k) * src_stride + j]; \
+                sum += filter[k] * src[(i - radius + k) * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
         } \
     } \
     for (i = borders_bottom; i < h; i++) { \
@@ -171,9 +168,9 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
                 if (i_tap >= h) { \
                     i_tap = h - (i_tap - h + 1); \
                 } \
-                sum += filter[k] * src[i_tap * src_stride + j]; \
+                sum += filter[k] * src[i_tap * src_stride / sizeof(type) + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> N; \
+            dst[i * dst_stride / sizeof(uint16_t) + j] = sum >> N; \
         } \
     } \
 }
@@ -181,26 +178,23 @@ static void convolution_x(const int *filter, int filt_w, const uint16_t *src,
 conv_y_fn(uint8_t, 8);
 conv_y_fn(uint16_t, 10);
 
-void convolution_f32(const int *filter, int filt_w, const void *src,
-                     uint16_t *dst, uint16_t *tmp, int w, int h,
-                     ptrdiff_t src_stride, ptrdiff_t dst_stride, uint8_t type)
+int compute_vmafmotion(const int *filter, int filt_w, void *src,
+                       uint16_t *temp_data, const uint16_t *ref, uint16_t *main,
+                       int w, int h, ptrdiff_t ref_stride, ptrdiff_t main_stride,
+                       double *score,  ptrdiff_t src_stride, uint8_t bitdepth)
 {
-    if(type == 8) {
-        convolution_y_8bit(filter, filt_w, (const uint8_t *) src, tmp, w, h,
-                           src_stride, dst_stride);
+    uint64_t sad;
+    if(bitdepth <= 8) {
+        convolution_y_8bit(filter, 5, (const uint8_t *) src, temp_data, w, h,
+                           src_stride, ref_stride);
     } else {
-        convolution_y_10bit(filter, filt_w, (const uint16_t *) src, tmp, w, h,
-                            src_stride, dst_stride);
+        convolution_y_10bit(filter, 5, (const uint16_t *) src, temp_data, w, h,
+                            src_stride, ref_stride);
     }
 
-    convolution_x(filter, filt_w, tmp, dst, w, h, dst_stride, dst_stride);
-}
+    convolution_x(filter, 5, temp_data, main, w, h, ref_stride, ref_stride);
 
-int compute_vmafmotion(const uint16_t *ref, const uint16_t *main, int w, int h,
-                       ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score)
-{
-    uint64_t sad = image_sad(ref, main, w, h, ref_stride / sizeof(uint16_t),
-                       main_stride / sizeof(uint16_t));
+    sad = image_sad(ref, main, w, h, ref_stride, main_stride);
     *score = (double) (sad * 1.0 / (w * h));
 
     return 0;
@@ -221,10 +215,8 @@ static int do_vmafmotion(FFFrameSync *fs)
     AVDictionary **metadata;
     int ret;
     ptrdiff_t ref_stride;
-    ptrdiff_t ref_px_stride;
     ptrdiff_t stride;
-    ptrdiff_t px_stride;
-    size_t data_sz;
+
     double score;
 
     ret = ff_framesync2_dualinput_get(fs, &main, &ref);
@@ -236,30 +228,17 @@ static int do_vmafmotion(FFFrameSync *fs)
     metadata = &main->metadata;
 
     ref_stride = ref->linesize[0];
-    stride = ALIGN_CEIL(s->width * sizeof(uint16_t));
-    data_sz = (size_t)stride * s->height;
-    px_stride = stride / sizeof(uint16_t);
+    stride = FFALIGN(s->width * sizeof(uint16_t), MAX_ALIGN);
 
-    if (s->desc->comp[0].depth <= 8) {
-        ref_px_stride = ref_stride / sizeof(uint8_t);
-        convolution_f32(s->filter, 5, (const uint8_t *) ref->data[0],
-                        s->blur_data, s->temp_data, s->width, s->height,
-                        ref_px_stride, px_stride, 8);
-    } else {
-        ref_px_stride = ref_stride / sizeof(uint16_t);
-        convolution_f32(s->filter, 5, (const uint16_t *) ref->data[0],
-                        s->blur_data, s->temp_data, s->width, s->height,
-                        ref_px_stride, px_stride, 10);
-    }
+    compute_vmafmotion(s->conv_filter, 5, ref->data[0], s->temp_data,
+                       s->prev_blur_data, s->blur_data, s->width, s->height,
+                       stride, stride, &score, ref_stride, s->desc->comp[0].depth);
 
     if(!s->nb_frames) {
         score = 0.0;
-    } else {
-        compute_vmafmotion(s->prev_blur_data, s->blur_data, s->width, s->height,
-                           stride, stride, &score);
     }
 
-    memcpy(s->prev_blur_data, s->blur_data, data_sz);
+    FFSWAP(uint16_t *, s->prev_blur_data, s->blur_data);
 
     set_meta(metadata, "lavfi.vmafmotion.score", score);
 
@@ -276,7 +255,7 @@ static av_cold int init(AVFilterContext *ctx)
 
     int i;
     for(i = 0; i < 5; i++) {
-        s->filter[i] = lrint(FILTER_5[i] * (1 << N));
+        s->conv_filter[i] = lrint(FILTER_5[i] * (1 << N));
     }
 
     s->fs.on_event = do_vmafmotion;
@@ -288,7 +267,7 @@ static int query_formats(AVFilterContext *ctx)
 {
     static const enum AVPixelFormat pix_fmts[] = {
         AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV420P,
-        AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV420P10LE,
+        AV_PIX_FMT_YUV444P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV420P10,
         AV_PIX_FMT_NONE
     };
 
@@ -319,7 +298,7 @@ static int config_input_ref(AVFilterLink *inlink)
     s->width = ctx->inputs[0]->w;
     s->height = ctx->inputs[0]->h;
 
-    stride = ALIGN_CEIL(s->width * sizeof(uint16_t));
+    stride = FFALIGN(s->width * sizeof(uint16_t), MAX_ALIGN);
     data_sz = (size_t)stride * s->height;
 
     if (!(s->prev_blur_data = av_malloc(data_sz))) {
@@ -365,7 +344,6 @@ static int activate(AVFilterContext *ctx)
     return ff_framesync2_activate(&s->fs);
 }
 
-
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFMotionContext *s = ctx->priv;
@@ -405,6 +383,7 @@ static const AVFilterPad vmafmotion_outputs[] = {
 AVFilter ff_vf_vmafmotion = {
     .name          = "vmafmotion",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF Motion score between two video streams."),
+    .preinit       = vmafmotion_framesync_preinit,
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,

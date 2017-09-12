@@ -19,10 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef MOTION_TOOLS_H_
-#define MOTION_TOOLS_H_
-
-#define N 15
+#ifndef AVFILTER_VMAFMOTION_H
+#define AVFILTER_VMAFMOTION_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -30,23 +28,20 @@
 typedef struct VMAFMotionDSPContext {
     uint64_t (*image_sad)(const uint16_t *img1, const uint16_t *img2, int w, int h,
                             ptrdiff_t img1_stride, ptrdiff_t img2_stride);
+    void (*convolution_x)(const int *filter, int filt_w, const uint16_t *src,
+                          uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                          ptrdiff_t dst_stride);
+    void (*convolution_y_8bit)(const int *filter, int filt_w, const uint8_t *src,
+                          uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                          ptrdiff_t dst_stride);
+    void (*convolution_y_10bit)(const int *filter, int filt_w, const uint16_t *src,
+                          uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                          ptrdiff_t dst_stride);                                                    
 } VMAFMotionDSPContext;
 
 void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp);
 
-static const float FILTER_5[5] = {
-    0.054488685,
-    0.244201342,
-    0.402619947,
-    0.244201342,
-    0.054488685
-};
+int compute_vmafmotion(const int *filter, int filt_w, void *src, uint16_t *temp_data, const uint16_t *ref, uint16_t *main, int w, int h,
+                       ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,  ptrdiff_t src_stride, uint8_t bitdepth);
 
-void convolution_f32(const int *filter, int filt_width, const void *src,
-                     uint16_t *dst, uint16_t *tmp, int w, int h,
-                     ptrdiff_t src_stride, ptrdiff_t dst_stride, uint8_t type);
-
-int compute_vmafmotion(const uint16_t *ref, const uint16_t *main, int w, int h,
-                       ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score);
-
-#endif /* MOTION_TOOLS_H_ */
+#endif /* AVFILTER_VMAFMOTION_H */
