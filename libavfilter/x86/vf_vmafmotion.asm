@@ -25,57 +25,24 @@
 
 SECTION .text
 
-%macro ABSW 2 ; img2/img1, tmp
-%if cpuflag(ssse3)
-    pabsw   %1, %1
-%else
-    pxor    %2, %2
-    psubw   %2, %1
-    pmaxsw  %1, %2
-%endif
-%endmacro
+INIT_XMM sse3
+cglobal sad, 6, 9, 6, buf1, buf2, w, h, buf1_stride, buf2_stride
+    pxor       m0, m0
+    mov        r0, [hq]
+.loop_y:
+    mov          r1, 0
+    .loop:
+        mova           m1, [buf1q]
+        mova           m2, [buf2q]
+        psubw          m1, m2
+        pabsw          m1, m1
+        paddw          m0, m1
+        add            r1, 1
+        cmp            r1, wq
+    jl .loop
 
-%macro IMAGE_SAD_FN 0
-cglobal sad_8x8, 4, 7, 6, img1, img2, img1_stride, img2_stride, \
-                          img1_stride3, img2_stride3, cnt
-    lea    img1_stride3q, [img1_strideq*3]
-    lea    img2_stride3q, [img2_strideq*3]
-    mov            cntd, 2
-    pxor             m0, m0
-.loop:
-    mova             m1, [img1q+img1_strideq*0]
-    mova             m2, [img1q+img1_strideq*1]
-    mova             m3, [img1q+img1_strideq*2]
-    mova             m4, [img1q+img1_stride3q]
-    lea            img1q, [img1q+img1_strideq*4]
-    psubw            m1, [img2q+img2_strideq*0]
-    psubw            m2, [img2q+img2_strideq*1]
-    psubw            m3, [img2q+img2_strideq*2]
-    psubw            m4, [img2q+img2_stride3q]
-    lea            img1q, [img2q+img2_strideq*4]
-    ABSW             m1, m5
-    ABSW             m2, m5
-    ABSW             m3, m5
-    ABSW             m4, m5
-    paddw            m1, m2
-    paddw            m3, m4
-    paddw            m0, m1
-    paddw            m0, m3
-    dec            cntd
-    jg .loop
-    movhlps          m1, m0
-    paddw            m0, m1
-    pshuflw      m1, m0, q1010
-    paddw            m0, m1
-    pshuflw      m1, m0, q0000 ; qNNNN is a base4-notation for imm8 arguments
-    paddw            m0, m0
-    movd            eax, m0
-    movsxwd         eax, ax
+    add        buf1q, buf1_strideq
+    add        buf2q, buf2_strideq
+    dec        r0
+    jg .loop_y
     RET
-%endmacro
-
-INIT_XMM sse2
-IMAGE_SAD_FN
-
-INIT_XMM ssse3
-IMAGE_SAD_FN

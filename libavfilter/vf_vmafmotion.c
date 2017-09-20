@@ -242,7 +242,10 @@ int ff_vmafmotion_init(VMAFMotionData *s,
     }
 
     vmafmotiondsp_init(&s->vmafdsp, desc->comp[0].depth);
-
+    
+    if (ARCH_X86)
+        ff_vmafmotion_init_x86(&s->vmafdsp);
+    
     return 0;
 }
 

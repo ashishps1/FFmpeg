@@ -23,14 +23,14 @@
 
 #include "libavfilter/vmaf_motion.h"
 
-uint64_t ff_image_sad_sse2(const uint16_t *img1, const uint16_t *img2, int w, int h,
+uint64_t ff_sad_sse3(const uint16_t *img1, const uint16_t *img2, int w, int h,
                         ptrdiff_t img1_stride, ptrdiff_t img2_stride);
 
 void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp)
 {
     int cpu_flags = av_get_cpu_flags();
 
-    if (EXTERNAL_SSE2(cpu_flags)) {
-        dsp->image_sad = ff_image_sad_sse2;
+    if (EXTERNAL_SSE3(cpu_flags)) {
+        dsp->sad = ff_sad_sse3;
     }
 }
