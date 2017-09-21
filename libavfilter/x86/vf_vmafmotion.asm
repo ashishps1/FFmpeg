@@ -26,23 +26,23 @@
 SECTION .text
 
 INIT_XMM sse3
-cglobal sad, 6, 9, 6, buf1, buf2, w, h, buf1_stride, buf2_stride
+cglobal sad, 6, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride
     pxor       m0, m0
-    mov        r0, [hq]
 .loop_y:
-    mov          r1, 0
+    mov          r6, 0
     .loop:
         mova           m1, [buf1q]
         mova           m2, [buf2q]
         psubw          m1, m2
         pabsw          m1, m1
         paddw          m0, m1
-        add            r1, 1
-        cmp            r1, wq
+        add            r6, 1
+        cmp            r6, wq
     jl .loop
 
     add        buf1q, buf1_strideq
     add        buf2q, buf2_strideq
-    dec        r0
+    dec        hq
     jg .loop_y
+    movd            eax, m0
     RET
