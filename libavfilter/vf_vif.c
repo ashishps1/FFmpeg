@@ -24,7 +24,7 @@
  * @file
  * Calculate VIF between two input videos.
  */
-
+/*
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -68,7 +68,6 @@ static void vif_dec2(const uint64_t *src, uint64_t *dst, int src_w, int src_h,
 
     int i, j;
 
-    /** decimation by 2 in each direction (after gaussian blur check) */
     for (i = 0; i < src_h / 2; i++) {
         for (j = 0; j < src_w / 2; j++) {
             dst[i * dst_px_stride + j] = src[(i * 2) * src_px_stride + (j * 2)];
@@ -185,7 +184,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
         } \
     } \
 }
-
+*/
 #define vif_filter1d_fn(type, bits) \
     static void vif_filter1d_##bits##bit(const int *filter, const type *src, uint64_t *dst, \
                                          uint64_t *temp_buf, int w, int h, ptrdiff_t src_stride, \
@@ -230,7 +229,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
         } \
     } \
 }
-
+/*
 vif_filter1d_fn(uint8_t, 8);
 vif_filter1d_fn(uint16_t, 16);
 vif_filter1d_fn(uint64_t, 64);
@@ -610,4 +609,4 @@ AVFilter ff_vf_vif = {
     .priv_class    = &vif_class,
     .inputs        = vif_inputs,
     .outputs       = vif_outputs,
-};
+};*/

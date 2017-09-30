@@ -23,7 +23,7 @@
  * @file
  * Calculate the ADM between two input videos.
  */
-
+/*
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -276,7 +276,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
         }
     }
 }
-
+*/
 #define adm_dwt2_fn(type, bits) \
     static void adm_dwt2_##bits##bit(const type *src, const adm_dwt_band_t *dst, \
                                      int w, int h, ptrdiff_t src_stride, \
@@ -374,7 +374,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
         } \
     } \
 }
-
+/*
 adm_dwt2_fn(uint8_t, 8);
 adm_dwt2_fn(uint16_t, 10);
 adm_dwt2_fn(int16_t, 32);
@@ -740,3 +740,4 @@ AVFilter ff_vf_adm = {
     .inputs        = adm_inputs,
     .outputs       = adm_outputs,
 };
+*/

@@ -405,6 +405,11 @@ static int opt_map_channel(void *optctx, const char *opt, const char *arg)
     int n;
     AVStream *st;
     AudioChannelMap *m;
+    char *allow_unused;
+    char *mapchan;
+    mapchan = av_strdup(arg);
+    if (!mapchan)
+        return AVERROR(ENOMEM);
 
     GROW_ARRAY(o->audio_channel_maps, o->nb_audio_channel_maps);
     m = &o->audio_channel_maps[o->nb_audio_channel_maps - 1];
@@ -415,6 +420,7 @@ static int opt_map_channel(void *optctx, const char *opt, const char *arg)
         m->file_idx = m->stream_idx = -1;
         if (n == 1)
             m->ofile_idx = m->ostream_idx = -1;
+        av_free(mapchan);
         return 0;
     }
 
@@ -450,11 +456,22 @@ static int opt_map_channel(void *optctx, const char *opt, const char *arg)
                m->file_idx, m->stream_idx);
         exit_program(1);
     }
+    /* allow trailing ? to map_channel */
+    if (allow_unused = strchr(mapchan, '?'))
+        *allow_unused = 0;
     if (m->channel_idx < 0 || m->channel_idx >= st->codecpar->channels) {
-        av_log(NULL, AV_LOG_FATAL, "mapchan: invalid audio channel #%d.%d.%d\n",
-               m->file_idx, m->stream_idx, m->channel_idx);
-        exit_program(1);
+        if (allow_unused) {
+            av_log(NULL, AV_LOG_VERBOSE, "mapchan: invalid audio channel #%d.%d.%d\n",
+                    m->file_idx, m->stream_idx, m->channel_idx);
+        } else {
+            av_log(NULL, AV_LOG_FATAL,  "mapchan: invalid audio channel #%d.%d.%d\n"
+                    "To ignore this, add a trailing '?' to the map_channel.\n",
+                    m->file_idx, m->stream_idx, m->channel_idx);
+            exit_program(1);
+        }
+
     }
+    av_free(mapchan);
     return 0;
 }
 
@@ -774,14 +791,16 @@ static void add_input_streams(OptionsContext *o, AVFormatContext *ic)
         case AVMEDIA_TYPE_VIDEO:
             if(!ist->dec)
                 ist->dec = avcodec_find_decoder(par->codec_id);
-#if FF_API_EMU_EDGE
+#if FF_API_LOWRES
             if (av_codec_get_lowres(st->codec)) {
                 av_codec_set_lowres(ist->dec_ctx, av_codec_get_lowres(st->codec));
                 ist->dec_ctx->width  = st->codec->width;
                 ist->dec_ctx->height = st->codec->height;
                 ist->dec_ctx->coded_width  = st->codec->coded_width;
                 ist->dec_ctx->coded_height = st->codec->coded_height;
+#if FF_API_EMU_EDGE
                 ist->dec_ctx->flags |= CODEC_FLAG_EMU_EDGE;
+#endif
             }
 #endif
 

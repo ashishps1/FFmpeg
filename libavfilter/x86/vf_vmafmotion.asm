@@ -23,26 +23,35 @@
 
 %include "libavutil/x86/x86util.asm"
 
+SECTION_RODATA
+
+pw_1: times 8 dw 1
+
 SECTION .text
 
 INIT_XMM sse3
 cglobal sad, 6, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride
     pxor       m0, m0
 .loop_y:
-    mov          r6, 0
+    xor          r6, r6
     .loop:
-        mova           m1, [buf1q]
-        mova           m2, [buf2q]
+        mova           m1, [buf1q+r6*2]
+        mova           m2, [buf2q+r6*2]
         psubw          m1, m2
         pabsw          m1, m1
-        paddw          m0, m1
-        add            r6, 1
-        cmp            r6, wq
+        pmaddwd        m1, [pw_1]
+        paddd          m0, m1
+        add            r6, mmsize / 2
+        cmp            r6d, wd
     jl .loop
 
     add        buf1q, buf1_strideq
     add        buf2q, buf2_strideq
-    dec        hq
+    dec        hd
     jg .loop_y
+    movhlps         m1, m0
+    paddd           m0, m1
+    pshufd          m1, m0, q0000
+    paddd           m0, m1
     movd            eax, m0
     RET

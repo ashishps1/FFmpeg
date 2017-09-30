@@ -174,6 +174,7 @@ typedef struct HLSContext {
 
     double initial_prog_date_time;
     char current_segment_final_filename_fmt[1024]; // when renaming segments
+    char *user_agent;
 } HLSContext;
 
 static int get_int_from_double(double val)
@@ -212,6 +213,22 @@ static int mkdir_p(const char *path) {
 
     av_free(temp);
     return ret;
+}
+
+static void set_http_options(AVFormatContext *s, AVDictionary **options, HLSContext *c)
+{
+    const char *proto = avio_find_protocol_name(s->filename);
+    int http_base_proto = proto ? (!av_strcasecmp(proto, "http") || !av_strcasecmp(proto, "https")) : 0;
+
+    if (c->method) {
+        av_dict_set(options, "method", c->method, 0);
+    } else if (http_base_proto) {
+        av_log(c, AV_LOG_WARNING, "No HTTP method set, hls muxer defaulting to method PUT.\n");
+        av_dict_set(options, "method", "PUT", 0);
+    }
+    if (c->user_agent)
+        av_dict_set(options, "user_agent", c->user_agent, 0);
+
 }
 
 static int replace_int_data_in_filename(char *buf, int buf_size, const char *filename, char placeholder, int64_t number)
@@ -591,7 +608,8 @@ static int hls_mux_init(AVFormatContext *s)
             return AVERROR_PATCHWELCOME;
         }
         hls->fmp4_init_mode = !byterange_mode;
-        if ((ret = s->io_open(s, &oc->pb, hls->base_output_dirname, AVIO_FLAG_WRITE, NULL)) < 0) {
+        set_http_options(s, &options, hls);
+        if ((ret = s->io_open(s, &oc->pb, hls->base_output_dirname, AVIO_FLAG_WRITE, &options)) < 0) {
             av_log(s, AV_LOG_ERROR, "Failed to open segment '%s'\n", hls->fmp4_init_filename);
             return ret;
         }
@@ -963,19 +981,6 @@ static void hls_free_segments(HLSSegment *p)
     }
 }
 
-static void set_http_options(AVFormatContext *s, AVDictionary **options, HLSContext *c)
-{
-    const char *proto = avio_find_protocol_name(s->filename);
-    int http_base_proto = proto ? (!av_strcasecmp(proto, "http") || !av_strcasecmp(proto, "https")) : 0;
-
-    if (c->method) {
-        av_dict_set(options, "method", c->method, 0);
-    } else if (http_base_proto) {
-        av_log(c, AV_LOG_WARNING, "No HTTP method set, hls muxer defaulting to method PUT.\n");
-        av_dict_set(options, "method", "PUT", 0);
-    }
-}
-
 static void write_m3u8_head_block(HLSContext *hls, AVIOContext *out, int version,
                                   int target_duration, int64_t sequence)
 {
@@ -1323,13 +1328,13 @@ static int hls_write_header(AVFormatContext *s)
 {
     HLSContext *hls = s->priv_data;
     int ret, i;
-    char *p;
+    char *p = NULL;
     const char *pattern = "%d.ts";
     const char *pattern_localtime_fmt = get_default_pattern_localtime_fmt(s);
     const char *vtt_pattern = "%d.vtt";
     AVDictionary *options = NULL;
-    int basename_size;
-    int vtt_basename_size;
+    int basename_size = 0;
+    int vtt_basename_size = 0;
 
     if (hls->segment_type == SEGMENT_TYPE_FMP4) {
         pattern = "%d.m4s";
@@ -1437,32 +1442,33 @@ static int hls_write_header(AVFormatContext *s)
         } else {
             av_strlcat(hls->basename, pattern, basename_size);
         }
+    }
 
-        if (av_strcasecmp(hls->fmp4_init_filename, "init.mp4")) {
-            int fmp4_init_filename_len = strlen(hls->fmp4_init_filename) + 1;
-            hls->base_output_dirname = av_malloc(fmp4_init_filename_len);
-            if (!hls->base_output_dirname) {
-                ret = AVERROR(ENOMEM);
-                goto fail;
-            }
-            av_strlcpy(hls->base_output_dirname, hls->fmp4_init_filename, fmp4_init_filename_len);
+    if (av_strcasecmp(hls->fmp4_init_filename, "init.mp4")) {
+        int fmp4_init_filename_len = strlen(hls->fmp4_init_filename) + 1;
+        hls->base_output_dirname = av_malloc(fmp4_init_filename_len);
+        if (!hls->base_output_dirname) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+        av_strlcpy(hls->base_output_dirname, hls->fmp4_init_filename, fmp4_init_filename_len);
+    } else {
+        hls->base_output_dirname = av_malloc(basename_size);
+        if (!hls->base_output_dirname) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+
+        av_strlcpy(hls->base_output_dirname, s->filename, basename_size);
+        p = strrchr(hls->base_output_dirname, '/');
+        if (p) {
+            *(p + 1) = '\0';
+            av_strlcat(hls->base_output_dirname, hls->fmp4_init_filename, basename_size);
         } else {
-            hls->base_output_dirname = av_malloc(basename_size);
-            if (!hls->base_output_dirname) {
-                ret = AVERROR(ENOMEM);
-                goto fail;
-            }
-
-            av_strlcpy(hls->base_output_dirname, s->filename, basename_size);
-            p = strrchr(hls->base_output_dirname, '/');
-            if (p) {
-                *(p + 1) = '\0';
-                av_strlcat(hls->base_output_dirname, hls->fmp4_init_filename, basename_size);
-            } else {
-                av_strlcpy(hls->base_output_dirname, hls->fmp4_init_filename, basename_size);
-            }
+            av_strlcpy(hls->base_output_dirname, hls->fmp4_init_filename, basename_size);
         }
     }
+
     if (!hls->use_localtime) {
         ret = sls_flag_check_duration_size_index(hls);
         if (ret < 0) {
@@ -1745,7 +1751,6 @@ static int hls_write_trailer(struct AVFormatContext *s)
         hls->size = avio_tell(hls->vtt_avf->pb) - hls->start_pos;
         ff_format_io_close(s, &vtt_oc->pb);
     }
-    av_freep(&hls->fmp4_init_filename);
     av_freep(&hls->basename);
     av_freep(&hls->base_output_dirname);
     av_freep(&hls->key_basename);
@@ -1754,6 +1759,7 @@ static int hls_write_trailer(struct AVFormatContext *s)
     hls->avf = NULL;
     hls_window(s, 1);
 
+    av_freep(&hls->fmp4_init_filename);
     if (vtt_oc) {
         av_freep(&hls->vtt_basename);
         av_freep(&hls->vtt_m3u8_name);
@@ -1816,6 +1822,7 @@ static const AVOption options[] = {
     {"generic", "start_number value (default)", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_START_SEQUENCE_AS_START_NUMBER }, INT_MIN, INT_MAX, E, "start_sequence_source_type" },
     {"epoch", "seconds since epoch", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_START_SEQUENCE_AS_SECONDS_SINCE_EPOCH }, INT_MIN, INT_MAX, E, "start_sequence_source_type" },
     {"datetime", "current datetime as YYYYMMDDhhmmss", 0, AV_OPT_TYPE_CONST, {.i64 = HLS_START_SEQUENCE_AS_FORMATTED_DATETIME }, INT_MIN, INT_MAX, E, "start_sequence_source_type" },
+    {"http_user_agent", "override User-Agent field in HTTP header", OFFSET(user_agent), AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,    E},
     { NULL },
 };
 

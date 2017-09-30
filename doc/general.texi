@@ -341,6 +341,7 @@ library:
 @item FunCom ISS                @tab   @tab X
     @tab Audio format used in various games from FunCom like The Longest Journey.
 @item G.723.1                   @tab X @tab X
+@item G.726                     @tab   @tab X @tab Both left- and right-justified.
 @item G.729 BIT                 @tab X @tab X
 @item G.729 raw                 @tab   @tab X
 @item GENH                      @tab   @tab X
@@ -529,7 +530,7 @@ library:
 @item Sony Wave64 (W64)         @tab X @tab X
 @item SoX native format         @tab X @tab X
 @item SUN AU format             @tab X @tab X
-@item SUP raw PGS subtitles     @tab   @tab X
+@item SUP raw PGS subtitles     @tab X @tab X
 @item SVAG                      @tab   @tab X
     @tab Audio format used in Konami PS2 games.
 @item TDSC                      @tab   @tab X
@@ -592,6 +593,8 @@ following image formats are supported:
     @tab Digital Picture Exchange
 @item EXR          @tab   @tab X
     @tab OpenEXR
+@item FITS         @tab X @tab X
+    @tab Flexible Image Transport System
 @item JPEG         @tab X @tab X
     @tab Progressive JPEG is not supported.
 @item JPEG 2000    @tab X @tab X

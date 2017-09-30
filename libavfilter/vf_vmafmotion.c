@@ -32,8 +32,7 @@
 #include "internal.h"
 #include "vmaf_motion.h"
 
-#define vmafmotion_options NULL
-#define BIT_SHIFT 10
+#define BIT_SHIFT 15
 
 static const float FILTER_5[5] = {
     0.054488685,
@@ -46,7 +45,17 @@ static const float FILTER_5[5] = {
 typedef struct VMAFMotionContext {
     const AVClass *class;
     VMAFMotionData data;
+    FILE *stats_file;
+    char *stats_file_str;
 } VMAFMotionContext;
+
+#define OFFSET(x) offsetof(VMAFMotionContext, x)
+#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
+
+static const AVOption vmafmotion_options[] = {
+    {"stats_file", "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
+    { NULL }
+};
 
 AVFILTER_DEFINE_CLASS(vmafmotion);
 
@@ -117,10 +126,10 @@ static void convolution_x(const uint16_t *filter, int filt_w, const uint16_t *sr
 }
 
 #define conv_y_fn(type, bits) \
-    static void convolution_y_##bits##bit(const uint16_t *filter, int filt_w, \
-                                          const uint8_t *_src, uint16_t *dst, \
-                                          int w, int h, ptrdiff_t _src_stride, \
-                                          ptrdiff_t _dst_stride) \
+static void convolution_y_##bits##bit(const uint16_t *filter, int filt_w, \
+                                      const uint8_t *_src, uint16_t *dst, \
+                                      int w, int h, ptrdiff_t _src_stride, \
+                                      ptrdiff_t _dst_stride) \
 { \
     const type *src = (const type *) _src; \
     ptrdiff_t src_stride = _src_stride / sizeof(*src); \
@@ -141,7 +150,7 @@ static void convolution_x(const uint16_t *filter, int filt_w, const uint16_t *sr
                 } \
                 sum += filter[k] * src[i_tap * src_stride + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> BIT_SHIFT; \
+            dst[i * dst_stride + j] = sum >> bits; \
         } \
     } \
     for (i = borders_top; i < borders_bottom; i++) { \
@@ -150,7 +159,7 @@ static void convolution_x(const uint16_t *filter, int filt_w, const uint16_t *sr
             for (k = 0; k < filt_w; k++) { \
                 sum += filter[k] * src[(i - radius + k) * src_stride + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> BIT_SHIFT; \
+            dst[i * dst_stride + j] = sum >> bits; \
         } \
     } \
     for (i = borders_bottom; i < h; i++) { \
@@ -163,7 +172,7 @@ static void convolution_x(const uint16_t *filter, int filt_w, const uint16_t *sr
                 } \
                 sum += filter[k] * src[i_tap * src_stride + j]; \
             } \
-            dst[i * dst_stride + j] = sum >> BIT_SHIFT; \
+            dst[i * dst_stride + j] = sum >> bits; \
         } \
     } \
 }
@@ -189,9 +198,10 @@ double ff_vmafmotion_process(VMAFMotionData *s, AVFrame *ref)
     if (!s->nb_frames) {
         score = 0.0;
     } else {
-        uint64_t sad = image_sad(s->blur_data[1], s->blur_data[0],
-                                 s->width, s->height, s->stride, s->stride);
-        score = (double) (sad * 1.0 / (s->width * s->height));
+        uint64_t sad = s->vmafdsp.sad(s->blur_data[1], s->blur_data[0],
+                                      s->width, s->height, s->stride, s->stride);
+        // the output score is always normalized to 8 bits
+        score = (double) (sad * 1.0 / (s->width * s->height << (BIT_SHIFT - 8)));
     }
 
     FFSWAP(uint16_t *, s->blur_data[0], s->blur_data[1]);
@@ -211,11 +221,14 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
 static void do_vmafmotion(AVFilterContext *ctx, AVFrame *ref)
 {
     VMAFMotionContext *s = ctx->priv;
-
     double score;
 
     score = ff_vmafmotion_process(&s->data, ref);
     set_meta(&ref->metadata, "lavfi.vmafmotion.score", score);
+    if (s->stats_file) {
+        fprintf(s->stats_file,
+                "n:%"PRId64" motion:%0.2lf\n", s->data.nb_frames, score);
+    }
 }
 
 
@@ -288,6 +301,29 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *ref)
     return ff_filter_frame(ctx->outputs[0], ref);
 }
 
+static av_cold int init(AVFilterContext *ctx)
+{
+    VMAFMotionContext *s = ctx->priv;
+
+    if (s->stats_file_str) {
+        if (!strcmp(s->stats_file_str, "-")) {
+            s->stats_file = stdout;
+        } else {
+            s->stats_file = fopen(s->stats_file_str, "w");
+            if (!s->stats_file) {
+                int err = AVERROR(errno);
+                char buf[128];
+                av_strerror(err, buf, sizeof(buf));
+                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
+                       s->stats_file_str, buf);
+                return err;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static av_cold void uninit(AVFilterContext *ctx)
 {
     VMAFMotionContext *s = ctx->priv;
@@ -296,6 +332,9 @@ static av_cold void uninit(AVFilterContext *ctx)
     if (s->data.nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "VMAF Motion avg: %.3f\n", avg_motion);
     }
+
+    if (s->stats_file && s->stats_file != stdout)
+        fclose(s->stats_file);
 }
 
 static const AVFilterPad vmafmotion_inputs[] = {
@@ -319,6 +358,7 @@ static const AVFilterPad vmafmotion_outputs[] = {
 AVFilter ff_vf_vmafmotion = {
     .name          = "vmafmotion",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF Motion score."),
+    .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
     .priv_size     = sizeof(VMAFMotionContext),

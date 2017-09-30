@@ -143,6 +143,11 @@ AVIOContext *avio_alloc_context(
     return s;
 }
 
+void avio_context_free(AVIOContext **ps)
+{
+    av_freep(ps);
+}
+
 static void writeout(AVIOContext *s, const uint8_t *data, int len)
 {
     if (!s->error) {
@@ -259,6 +264,8 @@ int64_t avio_seek(AVIOContext *s, int64_t offset, int whence)
         offset1 = pos + (s->buf_ptr - s->buffer);
         if (offset == 0)
             return offset1;
+        if (offset > INT64_MAX - offset1)
+            return AVERROR(EINVAL);
         offset += offset1;
     }
     if (offset < 0)
@@ -696,7 +703,7 @@ int ffio_read_indirect(AVIOContext *s, unsigned char *buf, int size, const unsig
     }
 }
 
-int ffio_read_partial(AVIOContext *s, unsigned char *buf, int size)
+int avio_read_partial(AVIOContext *s, unsigned char *buf, int size)
 {
     int len;
 
@@ -1121,7 +1128,9 @@ int avio_close(AVIOContext *s)
     else
         av_log(s, AV_LOG_DEBUG, "Statistics: %"PRId64" bytes read, %d seeks\n", s->bytes_read, s->seek_count);
     av_opt_free(s);
-    av_free(s);
+
+    avio_context_free(&s);
+
     return ffurl_close(h);
 }
 
@@ -1354,7 +1363,9 @@ int avio_close_dyn_buf(AVIOContext *s, uint8_t **pbuffer)
     *pbuffer = d->buffer;
     size = d->size;
     av_free(d);
-    av_free(s);
+
+    avio_context_free(&s);
+
     return size - padding;
 }
 
@@ -1397,6 +1408,8 @@ int ffio_close_null_buf(AVIOContext *s)
 
     size = d->size;
     av_free(d);
-    av_free(s);
+
+    avio_context_free(&s);
+
     return size;
 }

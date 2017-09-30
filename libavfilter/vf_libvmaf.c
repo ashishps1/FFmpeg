@@ -30,15 +30,15 @@
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "dualinput.h"
 #include "drawutils.h"
 #include "formats.h"
+#include "framesync.h"
 #include "internal.h"
 #include "video.h"
 
 typedef struct LIBVMAFContext {
     const AVClass *class;
-    FFDualInputContext dinput;
+    FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
     char *format;
     int width;
@@ -80,7 +80,7 @@ static const AVOption libvmaf_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(libvmaf);
+FRAMESYNC_DEFINE_CLASS(libvmaf, LIBVMAFContext, fs);
 
 #define read_frame_fn(type, bits)                                               \
     static int read_frame_##bits##bit(float *ref_data, float *main_data,        \
@@ -170,9 +170,18 @@ static void *call_vmaf(void *ctx)
     pthread_exit(NULL);
 }
 
-static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static int do_vmaf(FFFrameSync *fs)
 {
+    AVFilterContext *ctx = fs->parent;
     LIBVMAFContext *s = ctx->priv;
+    AVFrame *main, *ref;
+    int ret;
+
+    ret = ff_framesync_dualinput_get(fs, &main, &ref);
+    if (ret < 0)
+        return ret;
+    if (!ref)
+        return ff_filter_frame(ctx->outputs[0], main);
 
     pthread_mutex_lock(&s->lock);
 
@@ -188,7 +197,7 @@ static AVFrame *do_vmaf(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     pthread_cond_signal(&s->cond);
     pthread_mutex_unlock(&s->lock);
 
-    return main;
+    return ff_filter_frame(ctx->outputs[0], main);
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -201,7 +210,7 @@ static av_cold int init(AVFilterContext *ctx)
     pthread_mutex_init(&s->lock, NULL);
     pthread_cond_init (&s->cond, NULL);
 
-    s->dinput.process = do_vmaf;
+    s->fs.on_event = do_vmaf;
     return 0;
 }
 
@@ -257,34 +266,31 @@ static int config_output(AVFilterLink *outlink)
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
 
+    ret = ff_framesync_init_dualinput(&s->fs, ctx);
+    if (ret < 0)
+        return ret;
     outlink->w = mainlink->w;
     outlink->h = mainlink->h;
     outlink->time_base = mainlink->time_base;
     outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
     outlink->frame_rate = mainlink->frame_rate;
-    if ((ret = ff_dualinput_init(ctx, &s->dinput)) < 0)
+    if ((ret = ff_framesync_configure(&s->fs)) < 0)
         return ret;
 
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
+static int activate(AVFilterContext *ctx)
 {
-    LIBVMAFContext *s = inlink->dst->priv;
-    return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
-}
-
-static int request_frame(AVFilterLink *outlink)
-{
-    LIBVMAFContext *s = outlink->src->priv;
-    return ff_dualinput_request_frame(&s->dinput, outlink);
+    LIBVMAFContext *s = ctx->priv;
+    return ff_framesync_activate(&s->fs);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
     LIBVMAFContext *s = ctx->priv;
 
-    ff_dualinput_uninit(&s->dinput);
+    ff_framesync_uninit(&s->fs);
 
     pthread_mutex_lock(&s->lock);
     s->eof = 1;
@@ -304,11 +310,9 @@ static const AVFilterPad libvmaf_inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
     },{
         .name         = "reference",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
         .config_props = config_input_ref,
     },
     { NULL }
@@ -319,7 +323,6 @@ static const AVFilterPad libvmaf_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_output,
-        .request_frame = request_frame,
     },
     { NULL }
 };
@@ -327,9 +330,11 @@ static const AVFilterPad libvmaf_outputs[] = {
 AVFilter ff_vf_libvmaf = {
     .name          = "libvmaf",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the VMAF between two video streams."),
+    .preinit       = libvmaf_framesync_preinit,
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
+    .activate      = activate,
     .priv_size     = sizeof(LIBVMAFContext),
     .priv_class    = &libvmaf_class,
     .inputs        = libvmaf_inputs,

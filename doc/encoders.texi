@@ -92,12 +92,12 @@ using the value "enable", which is mainly useful for debugging or disabled using
 
 @item aac_is
 Sets intensity stereo coding tool usage. By default, it's enabled and will
-automatically toggle IS for similar pairs of stereo bands if it's benefitial.
+automatically toggle IS for similar pairs of stereo bands if it's beneficial.
 Can be disabled for debugging by setting the value to "disable".
 
 @item aac_pns
 Uses perceptual noise substitution to replace low entropy high frequency bands
-with imperceivable white noise during the decoding process. By default, it's
+with imperceptible white noise during the decoding process. By default, it's
 enabled, but can be disabled for debugging purposes by using "disable".
 
 @item aac_tns
@@ -599,7 +599,7 @@ Channel mode
 @item auto
 The mode is chosen automatically for each frame
 @item indep
-Chanels are independently coded
+Channels are independently coded
 @item left_side
 @item right_side
 @item mid_side
@@ -2554,7 +2554,13 @@ The following standard libavcodec options are used:
 @item
 @option{rc_init_occupancy} / @option{rc_initial_buffer_occupancy}
 @item
+@option{compression_level}
+
+Speed / quality tradeoff: higher values are faster / worse quality.
+@item
 @option{q} / @option{global_quality}
+
+Size / quality tradeoff: higher values are smaller / worse quality.
 @item
 @option{qmin}
 (only: @option{qmax} is not supported)
@@ -2575,11 +2581,20 @@ The following standard libavcodec options are used:
 @option{level} sets the value of @emph{level_idc}.
 
 @table @option
-@item quality
-Set the local encoding quality/speed tradeoff (range 1-8, higher values are faster; not all
-systems implement all levels).
 @item low_power
 Use low-power encoding mode.
+@item coder
+Set entropy encoder (default is @emph{cabac}).  Possible values:
+
+@table @samp
+@item ac
+@item cabac
+Use CABAC.
+
+@item vlc
+@item cavlc
+Use CAVLC.
+@end table
 @end table
 
 @item hevc_vaapi

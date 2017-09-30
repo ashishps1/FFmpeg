@@ -23,7 +23,7 @@
  * @file
  * Calculate the VMAF between two input videos.
  */
-
+/*
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
@@ -85,8 +85,8 @@ AVFILTER_DEFINE_CLASS(vmaf);
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 
-enum { C_SVC, NU_SVC, ONE_CLASS, EPSILON_SVR, NU_SVR };    /** svm_type */
-enum { LINEAR, POLY, RBF, SIGMOID, PRECOMPUTED }; /** kernel_type */
+enum { C_SVC, NU_SVC, ONE_CLASS, EPSILON_SVR, NU_SVR };
+enum { LINEAR, POLY, RBF, SIGMOID, PRECOMPUTED };
 
 #define swap(type, x, y) { type t=x; x=y; y=t; }
 
@@ -308,13 +308,14 @@ static char* readline(FILE *input)
     }
     return line;
 }
-
+*/
 /** FSCANF helps to handle fscanf failures.
  * Its do-while block avoids the ambiguity when
  * if (...)
  *    FSCANF();
  * is used
  */
+/*
 #define FSCANF(_stream, _format, _var) do{ if (fscanf(_stream, _format, _var) != 1) return 0; }while(0)
 static int read_model_header(FILE *fp, svm_model* model, AVFilterContext *ctx)
 {
@@ -421,7 +422,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         return NULL;
     }
 
-    /** read parameters */
     model = Malloc(svm_model,1);
     model->rho = NULL;
     model->probA = NULL;
@@ -430,7 +430,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
     model->label = NULL;
     model->nSV = NULL;
 
-    /** read header */
     if (!read_model_header(fp, model, ctx)) {
         av_log(ctx, AV_LOG_ERROR, "ERROR: fscanf failed to read model\n");
         av_free(model->rho);
@@ -440,7 +439,6 @@ static svm_model *svm_load_model(const char *model_file_name, AVFilterContext *c
         return NULL;
     }
 
-    /** read sv_coef and SV */
     elements = 0;
     pos = ftell(fp);
 
@@ -645,20 +643,16 @@ static int compute_vmaf(const AVFrame *ref, AVFrame *main, void *ctx)
     prediction = svm_predict(s->svm_model_ptr, s->nodes);
 
     if (!av_strcasecmp(norm_type, "linear_rescale")) {
-        /** denormalize */
         prediction = (prediction - (double)(intercepts[0])) / (double)(slopes[0]);
     }
 
-    /** score transform */
     if (s->enable_transform) {
         double value = 0.0;
 
-        /** quadratic transform */
         value += (double)(score_transform[0]);
         value += (double)(score_transform[1]) * prediction;
         value += (double)(score_transform[2]) * prediction * prediction;
 
-        /** rectification */
         if (value < prediction) {
             value = prediction;
         }
@@ -904,4 +898,4 @@ AVFilter ff_vf_vmaf = {
     .priv_class    = &vmaf_class,
     .inputs        = vmaf_inputs,
     .outputs       = vmaf_outputs,
-};
+};*/

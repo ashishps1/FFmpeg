@@ -204,6 +204,12 @@
     out3 = LW((psrc) + 3 * stride);                \
 }
 
+#define LW2(psrc, stride, out0, out1)  \
+{                                      \
+    out0 = LW((psrc));                 \
+    out1 = LW((psrc) + stride);        \
+}
+
 /* Description : Load double words with stride
    Arguments   : Inputs  - psrc    (source pointer to load from)
                          - stride
@@ -1047,6 +1053,25 @@
     CLIP_SH2_0_255(in2, in3);               \
 }
 
+#define CLIP_SH_0_255_MAX_SATU(in)                    \
+( {                                                   \
+    v8i16 out_m;                                      \
+                                                      \
+    out_m = __msa_maxi_s_h((v8i16) in, 0);            \
+    out_m = (v8i16) __msa_sat_u_h((v8u16) out_m, 7);  \
+    out_m;                                            \
+} )
+#define CLIP_SH2_0_255_MAX_SATU(in0, in1)  \
+{                                          \
+    in0 = CLIP_SH_0_255_MAX_SATU(in0);     \
+    in1 = CLIP_SH_0_255_MAX_SATU(in1);     \
+}
+#define CLIP_SH4_0_255_MAX_SATU(in0, in1, in2, in3)  \
+{                                                    \
+    CLIP_SH2_0_255_MAX_SATU(in0, in1);               \
+    CLIP_SH2_0_255_MAX_SATU(in2, in3);               \
+}
+
 /* Description : Clips all signed word elements of input vector
                  between 0 & 255
    Arguments   : Inputs  - in       (input vector)
@@ -1574,6 +1599,7 @@
     out0 = (RTYPE) __msa_ilvr_h((v8i16) in0, (v8i16) in1);  \
     out1 = (RTYPE) __msa_ilvl_h((v8i16) in0, (v8i16) in1);  \
 }
+#define ILVRL_H2_UB(...) ILVRL_H2(v16u8, __VA_ARGS__)
 #define ILVRL_H2_SB(...) ILVRL_H2(v16i8, __VA_ARGS__)
 #define ILVRL_H2_SH(...) ILVRL_H2(v8i16, __VA_ARGS__)
 #define ILVRL_H2_SW(...) ILVRL_H2(v4i32, __VA_ARGS__)
@@ -1609,6 +1635,15 @@
     MAXI_SH2(RTYPE, in2, in3, max_val);               \
 }
 #define MAXI_SH4_UH(...) MAXI_SH4(v8u16, __VA_ARGS__)
+#define MAXI_SH4_SH(...) MAXI_SH4(v8i16, __VA_ARGS__)
+
+#define MAXI_SH8(RTYPE, in0, in1, in2, in3, in4, in5, in6, in7, max_val)  \
+{                                                                         \
+    MAXI_SH4(RTYPE, in0, in1, in2, in3, max_val);                         \
+    MAXI_SH4(RTYPE, in4, in5, in6, in7, max_val);                         \
+}
+#define MAXI_SH8_UH(...) MAXI_SH8(v8u16, __VA_ARGS__)
+#define MAXI_SH8_SH(...) MAXI_SH8(v8i16, __VA_ARGS__)
 
 /* Description : Saturate the halfword element values to the max
                  unsigned value of (sat_val+1 bits)
@@ -1634,6 +1669,15 @@
     SAT_UH2(RTYPE, in2, in3, sat_val);               \
 }
 #define SAT_UH4_UH(...) SAT_UH4(v8u16, __VA_ARGS__)
+#define SAT_UH4_SH(...) SAT_UH4(v8i16, __VA_ARGS__)
+
+#define SAT_UH8(RTYPE, in0, in1, in2, in3, in4, in5, in6, in7, sat_val)  \
+{                                                                        \
+    SAT_UH4(RTYPE, in0, in1, in2, in3, sat_val);                         \
+    SAT_UH4(RTYPE, in4, in5, in6, in7, sat_val);                         \
+}
+#define SAT_UH8_UH(...) SAT_UH8(v8u16, __VA_ARGS__)
+#define SAT_UH8_SH(...) SAT_UH8(v8i16, __VA_ARGS__)
 
 /* Description : Saturate the halfword element values to the max
                  unsigned value of (sat_val+1 bits)
@@ -1964,6 +2008,11 @@
                  result is in place written to 'in0'
                  Similar for other pairs
 */
+#define SLLI_2V(in0, in1, shift)  \
+{                                 \
+    in0 = in0 << shift;           \
+    in1 = in1 << shift;           \
+}
 #define SLLI_4V(in0, in1, in2, in3, shift)  \
 {                                           \
     in0 = in0 << shift;                     \
@@ -2008,6 +2057,24 @@
     in3 = (RTYPE) __msa_srl_h((v8i16) in3, (v8i16) shift);  \
 }
 #define SRL_H4_UH(...) SRL_H4(v8u16, __VA_ARGS__)
+
+#define SRLR_H4(RTYPE, in0, in1, in2, in3, shift)            \
+{                                                            \
+    in0 = (RTYPE) __msa_srlr_h((v8i16) in0, (v8i16) shift);  \
+    in1 = (RTYPE) __msa_srlr_h((v8i16) in1, (v8i16) shift);  \
+    in2 = (RTYPE) __msa_srlr_h((v8i16) in2, (v8i16) shift);  \
+    in3 = (RTYPE) __msa_srlr_h((v8i16) in3, (v8i16) shift);  \
+}
+#define SRLR_H4_UH(...) SRLR_H4(v8u16, __VA_ARGS__)
+#define SRLR_H4_SH(...) SRLR_H4(v8i16, __VA_ARGS__)
+
+#define SRLR_H8(RTYPE, in0, in1, in2, in3, in4, in5, in6, in7, shift)  \
+{                                                                      \
+    SRLR_H4(RTYPE, in0, in1, in2, in3, shift);                         \
+    SRLR_H4(RTYPE, in4, in5, in6, in7, shift);                         \
+}
+#define SRLR_H8_UH(...) SRLR_H8(v8u16, __VA_ARGS__)
+#define SRLR_H8_SH(...) SRLR_H8(v8i16, __VA_ARGS__)
 
 /* Description : Shift right arithmetic rounded halfwords
    Arguments   : Inputs  - in0, in1, shift
@@ -2773,20 +2840,18 @@
 
 /* Description : Converts inputs to unsigned bytes, interleave, average & store
                  as 8x4 unsigned byte block
-   Arguments   : Inputs  - in0, in1, in2, in3, dst0, dst1, dst2, dst3,
-                           pdst, stride
+   Arguments   : Inputs  - in0, in1, in2, in3, dst0, dst1, pdst, stride
 */
-#define CONVERT_UB_AVG_ST8x4_UB(in0, in1, in2, in3,                    \
-                                dst0, dst1, dst2, dst3, pdst, stride)  \
-{                                                                      \
-    v16u8 tmp0_m, tmp1_m, tmp2_m, tmp3_m;                              \
-    uint8_t *pdst_m = (uint8_t *) (pdst);                              \
-                                                                       \
-    tmp0_m = PCKEV_XORI128_UB(in0, in1);                               \
-    tmp1_m = PCKEV_XORI128_UB(in2, in3);                               \
-    ILVR_D2_UB(dst1, dst0, dst3, dst2, tmp2_m, tmp3_m);                \
-    AVER_UB2_UB(tmp0_m, tmp2_m, tmp1_m, tmp3_m, tmp0_m, tmp1_m);       \
-    ST8x4_UB(tmp0_m, tmp1_m, pdst_m, stride);                          \
+#define CONVERT_UB_AVG_ST8x4_UB(in0, in1, in2, in3,           \
+                                dst0, dst1, pdst, stride)     \
+{                                                             \
+    v16u8 tmp0_m, tmp1_m;                                     \
+    uint8_t *pdst_m = (uint8_t *) (pdst);                     \
+                                                              \
+    tmp0_m = PCKEV_XORI128_UB(in0, in1);                      \
+    tmp1_m = PCKEV_XORI128_UB(in2, in3);                      \
+    AVER_UB2_UB(tmp0_m, dst0, tmp1_m, dst1, tmp0_m, tmp1_m);  \
+    ST8x4_UB(tmp0_m, tmp1_m, pdst_m, stride);                 \
 }
 
 /* Description : Pack even byte elements, extract 0 & 2 index words from pair
