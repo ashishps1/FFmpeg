@@ -1,7 +1,6 @@
 ;*****************************************************************************
 ;* x86-optimized functions for vmafmotion filter
 ;*
-;* Copyright (c) 2017 Ronald S. Bultje <rsbultje@gmail.com>
 ;* Copyright (c) 2017 Ashish Pratap Singh <ashk43712@gmail.com>
 ;*
 ;* This file is part of FFmpeg.
@@ -49,6 +48,7 @@ cglobal sad, 6, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride
     add        buf2q, buf2_strideq
     dec        hd
     jg .loop_y
+    
     movhlps         m1, m0
     paddd           m0, m1
     pshufd          m1, m0, q0000

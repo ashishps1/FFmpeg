@@ -23,14 +23,14 @@
  * @file
  * Calculate the ADM between two input videos.
  */
-/*
+
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "dualinput.h"
 #include "drawutils.h"
 #include "formats.h"
+#include "framesync.h"
 #include "internal.h"
 #include "adm.h"
 #include "video.h"
@@ -38,7 +38,7 @@
 
 typedef struct ADMContext {
     const AVClass *class;
-    FFDualInputContext dinput;
+    FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
     int width;
     int height;
@@ -53,7 +53,7 @@ static const AVOption adm_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(adm);
+FRAMESYNC_DEFINE_CLASS(adm, ADMContext, fs);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
@@ -276,7 +276,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
         }
     }
 }
-*/
+
 #define adm_dwt2_fn(type, bits) \
     static void adm_dwt2_##bits##bit(const type *src, const adm_dwt_band_t *dst, \
                                      int w, int h, ptrdiff_t src_stride, \
@@ -374,7 +374,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
         } \
     } \
 }
-/*
+
 adm_dwt2_fn(uint8_t, 8);
 adm_dwt2_fn(uint16_t, 10);
 adm_dwt2_fn(int16_t, 32);
@@ -553,10 +553,13 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata, key, value, 0);
 }
 
-static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static int do_adm(FFFrameSync *fs)
 {
+    AVFilterContext *ctx = fs->parent;
     ADMContext *s = ctx->priv;
-    AVDictionary **metadata = &main->metadata;
+    AVFrame *main, *ref;
+    int ret;
+    AVDictionary **metadata;
 
     double score = 0.0;
     double score_num = 0;
@@ -567,6 +570,13 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int h = s->height;
 
     ptrdiff_t ref_stride, main_stride;
+    
+    ret = ff_framesync_dualinput_get(fs, &main, &ref);
+    if (ret < 0)
+        return ret;
+    if (!ref)
+        return ff_filter_frame(ctx->outputs[0], main);
+    metadata = &main->metadata;
 
     ref_stride = ref->linesize[0];
     main_stride = main->linesize[0];
@@ -581,7 +591,7 @@ static AVFrame *do_adm(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     s->adm_sum += score;
 
-    return main;
+    return ff_filter_frame(ctx->outputs[0], main);
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -594,7 +604,7 @@ static av_cold int init(AVFilterContext *ctx)
         dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << N));
     }
 
-    s->dinput.process = do_adm;
+    s->fs.on_event = do_adm;
 
     return 0;
 }
@@ -667,27 +677,23 @@ static int config_output(AVFilterLink *outlink)
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
 
+    ret = ff_framesync_init_dualinput(&s->fs, ctx);
+    if (ret < 0)
+        return ret;
     outlink->w = mainlink->w;
     outlink->h = mainlink->h;
     outlink->time_base = mainlink->time_base;
     outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
     outlink->frame_rate = mainlink->frame_rate;
-    if ((ret = ff_dualinput_init(ctx, &s->dinput)) < 0)
+    if ((ret = ff_framesync_configure(&s->fs)) < 0)
         return ret;
-
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
+static int activate(AVFilterContext *ctx)
 {
-    ADMContext *s = inlink->dst->priv;
-    return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
-}
-
-static int request_frame(AVFilterLink *outlink)
-{
-    ADMContext *s = outlink->src->priv;
-    return ff_dualinput_request_frame(&s->dinput, outlink);
+    ADMContext *s = ctx->priv;
+    return ff_framesync_activate(&s->fs);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
@@ -702,18 +708,16 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_free(s->temp_lo);
     av_free(s->temp_hi);
 
-    ff_dualinput_uninit(&s->dinput);
+    ff_framesync_uninit(&s->fs);
 }
 
 static const AVFilterPad adm_inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
     },{
         .name         = "reference",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
         .config_props = config_input_ref,
     },
     { NULL }
@@ -724,7 +728,6 @@ static const AVFilterPad adm_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_output,
-        .request_frame = request_frame,
     },
     { NULL }
 };
@@ -732,12 +735,13 @@ static const AVFilterPad adm_outputs[] = {
 AVFilter ff_vf_adm = {
     .name          = "adm",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the ADM score between two video streams."),
+    .preinit       = adm_framesync_preinit,
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
+    .activate      = activate,
     .priv_size     = sizeof(ADMContext),
     .priv_class    = &adm_class,
     .inputs        = adm_inputs,
     .outputs       = adm_outputs,
 };
-*/

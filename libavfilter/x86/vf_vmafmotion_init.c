@@ -1,5 +1,4 @@
 /*
- * Copyright (c) 2017 Ronald S. Bultje <rsbultje@gmail.com>
  * Copyright (c) 2017 Ashish Pratap Singh <ashk43712@gmail.com>
  *
  * This file is part of FFmpeg.
