@@ -34,7 +34,6 @@
 #include "internal.h"
 #include "adm.h"
 #include "video.h"
-#include <emmintrin.h>
 
 typedef struct ADMContext {
     const AVClass *class;
@@ -61,8 +60,7 @@ FRAMESYNC_DEFINE_CLASS(adm, ADMContext, fs);
 
 static float rcp(float x)
 {
-    float xi = _mm_cvtss_f32(_mm_rcp_ss(_mm_load_ss(&x)));
-    return xi + xi * (1.0 - x * xi);
+    return 1.0 / x;
 }
 
 #define DIVS(n, d) ((n) * rcp(d))
