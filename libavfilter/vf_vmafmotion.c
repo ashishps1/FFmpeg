@@ -202,6 +202,7 @@ double ff_vmafmotion_process(VMAFMotionData *s, AVFrame *ref)
         uint64_t sad = s->vmafdsp.sad(s->blur_data[1], s->blur_data[0],
                                       s->width, s->height, s->stride, s->stride);
         STOP_TIMER("sad");
+        
         // the output score is always normalized to 8 bits
         score = (double) (sad * 1.0 / (s->width * s->height << (BIT_SHIFT - 8)));
     }
