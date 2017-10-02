@@ -84,7 +84,7 @@ typedef struct ADMContext {
     FFFrameSync fs;
     ADMData data;
     FILE *stats_file;
-    char *stats_file_str;    
+    char *stats_file_str;
 } ADMContext;
 
 #define OFFSET(x) offsetof(ADMContext, x)
@@ -611,7 +611,7 @@ static int do_adm(FFFrameSync *fs)
     int h = s->height;
 
     ptrdiff_t ref_stride, main_stride;
-    
+
     ret = ff_framesync_dualinput_get(fs, &main, &ref);
     if (ret < 0)
         return ret;
@@ -638,7 +638,7 @@ static int do_adm(FFFrameSync *fs)
 static av_cold int init(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
-    
+
     if (s->stats_file_str) {
         if (!strcmp(s->stats_file_str, "-")) {
             s->stats_file = stdout;
@@ -654,14 +654,14 @@ static av_cold int init(AVFilterContext *ctx)
             }
         }
     }
-        
+
     s->fs.on_event = do_adm;
 
     return 0;
 }
 
 int ff_adm_init(ADMData *s,
-                       int w, int h, enum AVPixelFormat fmt)
+                int w, int h, enum AVPixelFormat fmt)
 {
     int i;
 
@@ -678,17 +678,17 @@ int ff_adm_init(ADMData *s,
     buf_sz = (size_t)buf_stride * ((h + 1) / 2);
 
     stride = ALIGN_CEIL(w * sizeof(int16_t));
-    
+
     if (!(s->data_buf = av_malloc(buf_sz * 35)) ||
         !(s->temp_lo  = av_malloc(stride)) ||
         !(s->temp_hi  = av_malloc(stride))) {
         return AVERROR(ENOMEM);
-    }    
-    
+    }
+
     for(i = 0; i < 4; i++) {
         dwt2_db2_coeffs_lo_int[i] = lrint(dwt2_db2_coeffs_lo[i] * (1 << BIT_SHIFT));
         dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << BIT_SHIFT));
-    }    
+    }
 
     return 0;
 }
@@ -713,7 +713,7 @@ static int config_input_ref(AVFilterLink *inlink)
     ADMContext *s = ctx->priv;
 
     return ff_adm_init(&s->data, ctx->inputs[0]->w,
-                              ctx->inputs[0]->h, ctx->inputs[0]->format);
+                       ctx->inputs[0]->h, ctx->inputs[0]->format);
 }
 
 double ff_adm_uninit(ADMData *s)
@@ -756,13 +756,13 @@ static av_cold void uninit(AVFilterContext *ctx)
     ADMContext *s = ctx->priv;
 
     double avg_motion = ff_adm_uninit(&s->data);
-    
+
     if (s->data.nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", avg_motion);
     }
-    
+
     if (s->stats_file && s->stats_file != stdout)
-        fclose(s->stats_file);    
+        fclose(s->stats_file);
 
     ff_framesync_uninit(&s->fs);
 }
