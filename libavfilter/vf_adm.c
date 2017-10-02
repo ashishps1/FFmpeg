@@ -82,14 +82,7 @@ static const float Q[4][2] = {
 typedef struct ADMContext {
     const AVClass *class;
     FFFrameSync fs;
-    const AVPixFmtDescriptor *desc;
-    int width;
-    int height;
-    int16_t *data_buf;
-    int16_t *temp_lo;
-    int16_t *temp_hi;
-    double adm_sum;
-    uint64_t nb_frames;
+    ADMData data;
     FILE *stats_file;
     char *stats_file_str;    
 } ADMContext;
@@ -603,7 +596,8 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
 static int do_adm(FFFrameSync *fs)
 {
     AVFilterContext *ctx = fs->parent;
-    ADMContext *s = ctx->priv;
+    ADMContext *admctx = ctx->priv;
+    ADMData *s = &admctx->data;
     AVFrame *main, *ref;
     int ret;
     AVDictionary **metadata;
@@ -666,7 +660,7 @@ static av_cold int init(AVFilterContext *ctx)
     return 0;
 }
 
-static int ff_adm_init(ADMContext *s,
+int ff_adm_init(ADMData *s,
                        int w, int h, enum AVPixelFormat fmt)
 {
     int i;
@@ -718,11 +712,11 @@ static int config_input_ref(AVFilterLink *inlink)
     AVFilterContext *ctx  = inlink->dst;
     ADMContext *s = ctx->priv;
 
-    return ff_adm_init(s, ctx->inputs[0]->w,
+    return ff_adm_init(&s->data, ctx->inputs[0]->w,
                               ctx->inputs[0]->h, ctx->inputs[0]->format);
 }
 
-static double ff_adm_uninit(ADMContext *s)
+double ff_adm_uninit(ADMData *s)
 {
     av_free(s->data_buf);
     av_free(s->temp_lo);
@@ -761,9 +755,9 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
 
-    double avg_motion = ff_adm_uninit(s);
+    double avg_motion = ff_adm_uninit(&s->data);
     
-    if (s->nb_frames > 0) {
+    if (s->data.nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", avg_motion);
     }
     

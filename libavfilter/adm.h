@@ -22,11 +22,26 @@
 #ifndef AVFILTER_ADM_H
 #define AVFILTER_ADM_H
 
+typedef struct ADMData {
+    int width;
+    int height;
+    const AVPixFmtDescriptor *desc;
+    int16_t *data_buf;
+    int16_t *temp_lo;
+    int16_t *temp_hi;
+    double adm_sum;
+    uint64_t nb_frames;
+} ADMData;
+
 /** function to compute adm score */
 int compute_adm2(const void *ref, const void *main, int w, int h,
                  ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
                  double *score_num, double *score_den, double *scores,
                  int16_t *data_buf, int16_t *temp_lo, int16_t *temp_hi,
                  uint8_t type);
+                 
+int ff_adm_init(ADMData *data, int w, int h, enum AVPixelFormat fmt);
+double ff_adm_process(ADMData *data, AVFrame *frame);
+double ff_adm_uninit(ADMData *data);                 
 
 #endif /* AVFILTER_ADM_H */
