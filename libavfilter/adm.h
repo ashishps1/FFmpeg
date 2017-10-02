@@ -32,10 +32,10 @@ typedef struct ADMData {
     double adm_sum;
     uint64_t nb_frames;
 } ADMData;
-                 
+
 int ff_adm_init(ADMData *data, int w, int h, enum AVPixelFormat fmt);
 double ff_adm_process(ADMData *data, AVFrame *ref, AVFrame *main, double *score,
-                 double *score_num, double *score_den, double *scores);
-double ff_adm_uninit(ADMData *data);                 
+                      double *score_num, double *score_den, double *scores);
+double ff_adm_uninit(ADMData *data);
 
 #endif /* AVFILTER_ADM_H */

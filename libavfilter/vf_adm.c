@@ -443,7 +443,7 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
 }
 
 double ff_adm_process(ADMData *s, AVFrame *ref, AVFrame *main, double *score,
-                 double *score_num, double *score_den, double *scores)
+                      double *score_num, double *score_den, double *scores)
 {
     double numden_limit = 1e-2 * (s->width * s->height) / (1920.0 * 1080.0);
 
@@ -468,7 +468,7 @@ double ff_adm_process(ADMData *s, AVFrame *ref, AVFrame *main, double *score,
 
     ptrdiff_t ref_stride = ref->linesize[0];
     ptrdiff_t main_stride = main->linesize[0];
-    
+
     const void *curr_ref_scale = ref->data[0];
     const void *curr_main_scale = main->data[0];
 
@@ -616,7 +616,7 @@ static int do_adm(FFFrameSync *fs)
     if (admctx->stats_file) {
         fprintf(admctx->stats_file,
                 "n:%"PRId64" vif:%0.2lf\n", s->nb_frames, score);
-    }    
+    }
 
     s->nb_frames++;
 
