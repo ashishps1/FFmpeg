@@ -42,7 +42,7 @@
 /** Percentage of frame to discard on all 4 sides */
 #define ADM_BORDER_FACTOR (0.1)
 
-#define N 15
+#define BIT_SHIFT 15
 
 typedef struct adm_dwt_band_t {
     int16_t *band_a; /** Low-pass V + low-pass H. */
@@ -90,9 +90,15 @@ typedef struct ADMContext {
     int16_t *temp_hi;
     double adm_sum;
     uint64_t nb_frames;
+    FILE *stats_file;
+    char *stats_file_str;    
 } ADMContext;
 
+#define OFFSET(x) offsetof(ADMContext, x)
+#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
+
 static const AVOption adm_options[] = {
+    {"stats_file", "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
     { NULL }
 };
 
@@ -100,7 +106,6 @@ FRAMESYNC_DEFINE_CLASS(adm, ADMContext, fs);
 
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
-#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
 
 static float rcp(float x)
 {
@@ -213,9 +218,9 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     ptrdiff_t src_px_stride = src_stride / sizeof(int16_t);
     ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t);
 
-    uint16_t rfactor[3] = {lrint((1.0 / Q[scale][0]) * (1 << N)),
-        lrint((1.0 / Q[scale][0]) * (1 << N)),
-        lrint((1.0 / Q[scale][1]) * (1 << N))};
+    uint16_t rfactor[3] = {lrint((1.0 / Q[scale][0]) * (1 << BIT_SHIFT)),
+        lrint((1.0 / Q[scale][0]) * (1 << BIT_SHIFT)),
+        lrint((1.0 / Q[scale][1]) * (1 << BIT_SHIFT))};
 
     int i, j, theta;
 
@@ -226,7 +231,7 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
         for (i = 0; i < h; i++) {
             for (j = 0; j < w; j++) {
                 dst_ptr[i * dst_px_stride + j] = (rfactor[theta] *
-                                                  src_ptr[i * src_px_stride + j]) >> N;
+                                                  src_ptr[i * src_px_stride + j]) >> BIT_SHIFT;
             }
         }
     }
@@ -260,7 +265,7 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int16_t *dst, int w, int h,
                 for (filt_i = 0; filt_i < 3; filt_i++) {
                     for (filt_j = 0; filt_j < 3; filt_j++) {
                         filt_coeff = (lrint((filt_i == 1 && filt_j == 1) ? 1.0 /
-                                            15.0 : 1.0 / 30.0) * (1 << N));
+                                            15.0 : 1.0 / 30.0) * (1 << BIT_SHIFT));
 
                         src_i = i - 1 + filt_i;
                         src_j = j - 1 + filt_j;
@@ -279,7 +284,7 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int16_t *dst, int w, int h,
                     }
                 }
 
-                dst[i * dst_px_stride + j] += sum >> N;
+                dst[i * dst_px_stride + j] += sum >> BIT_SHIFT;
             }
         }
     }
@@ -359,8 +364,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                 sum_hi += filt_coeff_hi * img_coeff; \
             } \
             \
-            temp_lo[j] = sum_lo >> N; \
-            temp_hi[j] = sum_hi >> N; \
+            temp_lo[j] = sum_lo >> BIT_SHIFT; \
+            temp_hi[j] = sum_hi >> BIT_SHIFT; \
         } \
         \
         /** Horizontal pass (lo). */ \
@@ -385,8 +390,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                 sum_hi += filt_coeff_hi * img_coeff; \
             } \
             \
-            dst->band_a[i * dst_px_stride + j] = sum_lo >> N; \
-            dst->band_v[i * dst_px_stride + j] = sum_hi >> N; \
+            dst->band_a[i * dst_px_stride + j] = sum_lo >> BIT_SHIFT; \
+            dst->band_v[i * dst_px_stride + j] = sum_hi >> BIT_SHIFT; \
         } \
         \
         /** Horizontal pass (hi). */ \
@@ -411,8 +416,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                 sum_hi += filt_coeff_hi * img_coeff; \
             } \
             \
-            dst->band_h[i * dst_px_stride + j] = sum_lo >> N; \
-            dst->band_d[i * dst_px_stride + j] = sum_hi >> N; \
+            dst->band_h[i * dst_px_stride + j] = sum_lo >> BIT_SHIFT; \
+            dst->band_d[i * dst_px_stride + j] = sum_hi >> BIT_SHIFT; \
         } \
     } \
 }
@@ -639,14 +644,57 @@ static int do_adm(FFFrameSync *fs)
 static av_cold int init(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
-
-    int i;
-    for(i = 0; i < 4; i++) {
-        dwt2_db2_coeffs_lo_int[i] = lrint(dwt2_db2_coeffs_lo[i] * (1 << N));
-        dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << N));
+    
+    if (s->stats_file_str) {
+        if (!strcmp(s->stats_file_str, "-")) {
+            s->stats_file = stdout;
+        } else {
+            s->stats_file = fopen(s->stats_file_str, "w");
+            if (!s->stats_file) {
+                int err = AVERROR(errno);
+                char buf[128];
+                av_strerror(err, buf, sizeof(buf));
+                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
+                       s->stats_file_str, buf);
+                return err;
+            }
+        }
     }
-
+        
     s->fs.on_event = do_adm;
+
+    return 0;
+}
+
+static int ff_adm_init(ADMContext *s,
+                       int w, int h, enum AVPixelFormat fmt)
+{
+    int i;
+
+    ptrdiff_t buf_stride;
+    size_t buf_sz;
+    ptrdiff_t stride;
+
+    s->width = w;
+    s->height = h;
+    s->desc = av_pix_fmt_desc_get(fmt);
+    stride = FFALIGN(w * sizeof(uint16_t), 32);
+
+    buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(int16_t));
+    buf_sz = (size_t)buf_stride * ((h + 1) / 2);
+
+    stride = ALIGN_CEIL(w * sizeof(int16_t));
+    
+    if (!(s->data_buf = av_malloc(buf_sz * 35)) ||
+        !(s->temp_lo  = av_malloc(stride)) ||
+        !(s->temp_hi  = av_malloc(stride))) {
+        return AVERROR(ENOMEM);
+    }    
+    
+    for(i = 0; i < 4; i++) {
+        dwt2_db2_coeffs_lo_int[i] = lrint(dwt2_db2_coeffs_lo[i] * (1 << BIT_SHIFT));
+        dwt2_db2_coeffs_hi_int[i] = lrint(dwt2_db2_coeffs_hi[i] * (1 << BIT_SHIFT));
+    }    
 
     return 0;
 }
@@ -669,48 +717,19 @@ static int config_input_ref(AVFilterLink *inlink)
 {
     AVFilterContext *ctx  = inlink->dst;
     ADMContext *s = ctx->priv;
-    ptrdiff_t buf_stride;
-    size_t buf_sz;
-    ptrdiff_t stride;
 
-    if (ctx->inputs[0]->w != ctx->inputs[1]->w ||
-        ctx->inputs[0]->h != ctx->inputs[1]->h) {
-        av_log(ctx, AV_LOG_ERROR, "Width and height of input videos must be same.\n");
-        return AVERROR(EINVAL);
-    }
-    if (ctx->inputs[0]->format != ctx->inputs[1]->format) {
-        av_log(ctx, AV_LOG_ERROR, "Inputs must be of same pixel format.\n");
-        return AVERROR(EINVAL);
-    }
-
-    s->desc = av_pix_fmt_desc_get(inlink->format);
-    s->width = ctx->inputs[0]->w;
-    s->height = ctx->inputs[0]->h;
-
-    buf_stride = ALIGN_CEIL(((s->width + 1) / 2) * sizeof(int16_t));
-    buf_sz = (size_t)buf_stride * ((s->height + 1) / 2);
-
-    if (SIZE_MAX / buf_sz < 35) {
-        av_log(ctx, AV_LOG_ERROR, "error: SIZE_MAX / buf_sz_one < 35");
-        return AVERROR(EINVAL);
-    }
-
-    if (!(s->data_buf = av_malloc(buf_sz * 35))) {
-        return AVERROR(ENOMEM);
-    }
-
-    stride = ALIGN_CEIL(s->width * sizeof(int16_t));
-    if (!(s->temp_lo = av_malloc(stride))) {
-        return AVERROR(ENOMEM);
-    }
-
-    if (!(s->temp_hi = av_malloc(stride))) {
-        return AVERROR(ENOMEM);
-    }
-
-    return 0;
+    return ff_adm_init(s, ctx->inputs[0]->w,
+                              ctx->inputs[0]->h, ctx->inputs[0]->format);
 }
 
+static double ff_adm_uninit(ADMContext *s)
+{
+    av_free(s->data_buf);
+    av_free(s->temp_lo);
+    av_free(s->temp_hi);
+
+    return s->nb_frames > 0 ? s->adm_sum / s->nb_frames : 0.0;
+}
 
 static int config_output(AVFilterLink *outlink)
 {
@@ -742,13 +761,14 @@ static av_cold void uninit(AVFilterContext *ctx)
 {
     ADMContext *s = ctx->priv;
 
+    double avg_motion = ff_adm_uninit(s);
+    
     if (s->nb_frames > 0) {
-        av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", s->adm_sum / s->nb_frames);
+        av_log(ctx, AV_LOG_INFO, "ADM AVG: %.3f\n", avg_motion);
     }
-
-    av_free(s->data_buf);
-    av_free(s->temp_lo);
-    av_free(s->temp_hi);
+    
+    if (s->stats_file && s->stats_file != stdout)
+        fclose(s->stats_file);    
 
     ff_framesync_uninit(&s->fs);
 }
