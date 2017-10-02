@@ -272,7 +272,7 @@ static int query_formats(AVFilterContext *ctx)
 
     for (format = 0; av_pix_fmt_desc_get(format); format++) {
         const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(format);
-        if (!(desc->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_BITSTREAM | AV_PIX_FMT_FLAG_PAL)) &&
+        if (!(desc->flags & (AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_BITSTREAM | AV_PIX_FMT_FLAG_PAL)) &&
             (desc->flags & AV_PIX_FMT_FLAG_PLANAR || desc->nb_components == 1) &&
             (!(desc->flags & AV_PIX_FMT_FLAG_BE) == !HAVE_BIGENDIAN || desc->comp[0].depth == 8) &&
             (desc->comp[0].depth == 8 || desc->comp[0].depth == 10) &&

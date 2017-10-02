@@ -100,12 +100,7 @@ FRAMESYNC_DEFINE_CLASS(adm, ADMContext, fs);
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 
-static float rcp(float x)
-{
-    return 1.0 / x;
-}
-
-#define DIVS(n, d) ((n) * rcp(d))
+#define DIVS(n, d) ((n) * (1.0 / d))
 
 static int32_t get_cube(int16_t val)
 {
@@ -319,13 +314,14 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 
 #define adm_dwt2_fn(type, bits) \
     static void adm_dwt2_##bits##bit(const type *src, const adm_dwt_band_t *dst, \
-                                     int w, int h, ptrdiff_t src_stride, \
-                                     ptrdiff_t dst_stride, int16_t *temp_lo, \
-                                     int16_t* temp_hi) \
+                                     ptrdiff_t src_stride, \
+                                     ptrdiff_t dst_stride, ADMData *s) \
 { \
     const int32_t *filter_lo = dwt2_db2_coeffs_lo_int; \
     const int32_t *filter_hi = dwt2_db2_coeffs_hi_int; \
     int filt_w = sizeof(dwt2_db2_coeffs_lo_int) / sizeof(int); \
+    int w = s->width; \
+    int h = s->height; \
     \
     ptrdiff_t src_px_stride = src_stride / sizeof(type); \
     ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t); \
@@ -357,8 +353,8 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                 sum_hi += filt_coeff_hi * img_coeff; \
             } \
             \
-            temp_lo[j] = sum_lo >> BIT_SHIFT; \
-            temp_hi[j] = sum_hi >> BIT_SHIFT; \
+            s->temp_lo[j] = sum_lo >> BIT_SHIFT; \
+            s->temp_hi[j] = sum_hi >> BIT_SHIFT; \
         } \
         \
         /** Horizontal pass (lo). */ \
@@ -377,7 +373,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                     src_j = 2 * w - src_j - 1; \
                 } \
                 \
-                img_coeff = temp_lo[src_j]; \
+                img_coeff = s->temp_lo[src_j]; \
                 \
                 sum_lo += filt_coeff_lo * img_coeff; \
                 sum_hi += filt_coeff_hi * img_coeff; \
@@ -403,7 +399,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                     src_j = 2 * w - src_j - 1; \
                 } \
                 \
-                img_coeff = temp_hi[src_j]; \
+                img_coeff = s->temp_hi[src_j]; \
                 \
                 sum_lo += filt_coeff_lo * img_coeff; \
                 sum_hi += filt_coeff_hi * img_coeff; \
@@ -446,13 +442,10 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
     return data_top;
 }
 
-int compute_adm2(const void *ref, const void *main, int w, int h,
-                 ptrdiff_t ref_stride, ptrdiff_t main_stride, double *score,
-                 double *score_num, double *score_den, double *scores,
-                 int16_t *data_buf, int16_t *temp_lo, int16_t *temp_hi,
-                 uint8_t type)
+double ff_adm_process(ADMData *s, AVFrame *ref, AVFrame *main, double *score,
+                 double *score_num, double *score_den, double *scores)
 {
-    double numden_limit = 1e-2 * (w * h) / (1920.0 * 1080.0);
+    double numden_limit = 1e-2 * (s->width * s->height) / (1920.0 * 1080.0);
 
     char *data_top;
 
@@ -473,12 +466,18 @@ int compute_adm2(const void *ref, const void *main, int w, int h,
 
     adm_dwt_band_t cm_r;
 
-    const void *curr_ref_scale = ref;
-    const void *curr_main_scale = main;
+    ptrdiff_t ref_stride = ref->linesize[0];
+    ptrdiff_t main_stride = main->linesize[0];
+    
+    const void *curr_ref_scale = ref->data[0];
+    const void *curr_main_scale = main->data[0];
+
     ptrdiff_t curr_ref_stride = ref_stride;
     ptrdiff_t curr_main_stride = main_stride;
 
-    int orig_h = h;
+    int w = s->width;
+    int h = s->height;
+    int orig_h = s->height;
 
     ptrdiff_t buf_stride = ALIGN_CEIL(((w + 1) / 2) * sizeof(int16_t));
     size_t buf_sz = (size_t)buf_stride * ((h + 1) / 2);
@@ -487,9 +486,8 @@ int compute_adm2(const void *ref, const void *main, int w, int h,
     double den = 0;
 
     int scale;
-    int ret = 1;
 
-    data_top = (char *) (data_buf);
+    data_top = (char *) (s->data_buf);
 
     ref_scale = (int16_t *) data_top;
     data_top += buf_sz;
@@ -514,22 +512,22 @@ int compute_adm2(const void *ref, const void *main, int w, int h,
         float den_scale = 0.0;
 
         if(!scale) {
-            if(type <= 8) {
-                adm_dwt2_8bit((const uint8_t *) curr_ref_scale, &ref_dwt2, w,
-                              h, curr_ref_stride, buf_stride, temp_lo, temp_hi);
-                adm_dwt2_8bit((const uint8_t *) curr_main_scale, &main_dwt2, w,
-                              h, curr_main_stride, buf_stride, temp_lo, temp_hi);
+            if(s->desc->comp[0].depth <= 8) {
+                adm_dwt2_8bit((const uint8_t *) curr_ref_scale, &ref_dwt2,
+                              curr_ref_stride, buf_stride, s);
+                adm_dwt2_8bit((const uint8_t *) curr_main_scale, &main_dwt2,
+                              curr_main_stride, buf_stride, s);
             } else {
-                adm_dwt2_10bit((const uint16_t *) curr_ref_scale, &ref_dwt2, w,
-                               h, curr_ref_stride, buf_stride, temp_lo, temp_hi);
-                adm_dwt2_10bit((const uint16_t *) curr_main_scale, &main_dwt2, w,
-                               h, curr_main_stride, buf_stride, temp_lo, temp_hi);
+                adm_dwt2_10bit((const uint16_t *) curr_ref_scale, &ref_dwt2,
+                               curr_ref_stride, buf_stride, s);
+                adm_dwt2_10bit((const uint16_t *) curr_main_scale, &main_dwt2,
+                               curr_main_stride, buf_stride, s);
             }
         } else{
-            adm_dwt2_32bit((const int16_t *) curr_ref_scale, &ref_dwt2, w, h,
-                           curr_ref_stride, buf_stride, temp_lo, temp_hi);
-            adm_dwt2_32bit((const int16_t *) curr_main_scale, &main_dwt2, w, h,
-                           curr_main_stride, buf_stride, temp_lo, temp_hi);
+            adm_dwt2_32bit((const int16_t *) curr_ref_scale, &ref_dwt2,
+                           curr_ref_stride, buf_stride, s);
+            adm_dwt2_32bit((const int16_t *) curr_main_scale, &main_dwt2,
+                           curr_main_stride, buf_stride, s);
         }
 
         w = (w + 1) / 2;
@@ -581,9 +579,7 @@ int compute_adm2(const void *ref, const void *main, int w, int h,
     *score_num = num;
     *score_den = den;
 
-    ret = 0;
-
-    return ret;
+    return *score;
 }
 
 static void set_meta(AVDictionary **metadata, const char *key, float d)
@@ -607,11 +603,6 @@ static int do_adm(FFFrameSync *fs)
     double score_den = 0;
     double scores[2 * 4];
 
-    int w = s->width;
-    int h = s->height;
-
-    ptrdiff_t ref_stride, main_stride;
-
     ret = ff_framesync_dualinput_get(fs, &main, &ref);
     if (ret < 0)
         return ret;
@@ -619,14 +610,13 @@ static int do_adm(FFFrameSync *fs)
         return ff_filter_frame(ctx->outputs[0], main);
     metadata = &main->metadata;
 
-    ref_stride = ref->linesize[0];
-    main_stride = main->linesize[0];
-
-    compute_adm2(ref->data[0], main->data[0], w, h, ref_stride, main_stride,
-                 &score, &score_num, &score_den, scores, s->data_buf, s->temp_lo,
-                 s->temp_hi, s->desc->comp[0].depth);
+    score = ff_adm_process(s, ref, main, &score, &score_num, &score_den, scores);
 
     set_meta(metadata, "lavfi.adm.score", score);
+    if (admctx->stats_file) {
+        fprintf(admctx->stats_file,
+                "n:%"PRId64" vif:%0.2lf\n", s->nb_frames, score);
+    }    
 
     s->nb_frames++;
 
