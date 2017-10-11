@@ -29,19 +29,19 @@ pw_1: times 8 dw 1
 SECTION .text
 
 INIT_XMM sse3
-cglobal sad, 6, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride
+cglobal sad, 7, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride, x
     pxor       m0, m0
 .loop_y:
-    xor          r6, r6
+    xor          xq, xq
     .loop:
-        mova           m1, [buf1q+r6*2]
-        mova           m2, [buf2q+r6*2]
+        mova           m1, [buf1q+xq*2]
+        mova           m2, [buf2q+xq*2]
         psubw          m1, m2
         pabsw          m1, m1
         pmaddwd        m1, [pw_1]
         paddd          m0, m1
-        add            r6, mmsize / 2
-        cmp            r6d, wd
+        add            xq, mmsize / 2
+        cmp            xd, wd
     jl .loop
 
     add        buf1q, buf1_strideq

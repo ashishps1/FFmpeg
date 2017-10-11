@@ -24,6 +24,12 @@
 
 uint64_t ff_sad_sse3(const uint16_t *img1, const uint16_t *img2, int w, int h,
                         ptrdiff_t img1_stride, ptrdiff_t img2_stride);
+void ff_convolution_x_sse3(const uint16_t *filter, int filt_w, const uint16_t *src,
+                  uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                  ptrdiff_t dst_stride);
+void ff_convolution_y_sse3(const uint16_t *filter, int filt_w, const uint8_t *src,
+                  uint16_t *dst, int w, int h, ptrdiff_t src_stride,
+                  ptrdiff_t dst_stride);                        
 
 void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp)
 {
@@ -31,5 +37,7 @@ void ff_vmafmotion_init_x86(VMAFMotionDSPContext *dsp)
 
     if (EXTERNAL_SSE3(cpu_flags)) {
         dsp->sad = ff_sad_sse3;
+        //dsp->convolution_x = ff_convolution_x_sse3;
+        //dsp->convolution_y = ff_convolution_y_sse3;
     }
 }
