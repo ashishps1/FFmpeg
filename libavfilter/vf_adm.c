@@ -105,6 +105,36 @@ static int32_t get_cube(int16_t val)
     return val * val * val;
 }
 
+static double diff(double n, double mid)
+{
+    if (n > (mid * mid * mid))
+        return (n- (mid * mid * mid));
+    else
+        return ((mid * mid * mid) - n);
+}
+
+static double cube_root(double n)
+{
+    double start = 0, end = n;
+ 
+    double e = 0.0000001;
+ 
+    while (1)
+    {
+        double mid = (start + end)/2;
+        double error = diff(n, mid);
+
+        if (error <= e)
+            return mid;
+
+        if ((mid * mid * mid) > n)
+            end = mid;
+
+        else
+            start = mid;
+    }
+}
+
 static int16_t adm_sum_cube(const int16_t *x, int w, int h, ptrdiff_t stride)
 {
     ptrdiff_t px_stride = stride / sizeof(int16_t);
@@ -123,7 +153,7 @@ static int16_t adm_sum_cube(const int16_t *x, int w, int h, ptrdiff_t stride)
         }
     }
 
-    return ceil(cbrt(sum)) + ceil(cbrt((bottom - top) * (right - left) / 32.0));
+    return ceil(cube_root(sum)) + ceil(cube_root((bottom - top) * (right - left) / 32.0));
 }
 
 static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
