@@ -39,8 +39,6 @@
  * in pixels/degree of visual angle. This should be 56.55
  */
 #define R 56.55
-/** Percentage of frame to discard on all 4 sides */
-#define ADM_BORDER_FACTOR (0.1)
 
 #define BIT_SHIFT 15
 
@@ -107,12 +105,11 @@ static int32_t get_cube(int16_t val)
     return val * val * val;
 }
 
-static int16_t adm_sum_cube(const int16_t *x, int w, int h, ptrdiff_t stride,
-                            double border_factor)
+static int16_t adm_sum_cube(const int16_t *x, int w, int h, ptrdiff_t stride)
 {
     ptrdiff_t px_stride = stride / sizeof(int16_t);
-    int left = w * border_factor - 0.5;
-    int top = h * border_factor - 0.5;
+    int left = (w - 5) / 10;
+    int top = (h - 5) / 10;
     int right = w - left;
     int bottom = h - top;
 
@@ -543,13 +540,13 @@ double ff_adm_process(ADMData *s, AVFrame *ref, AVFrame *main, double *score,
         adm_cm_thresh(&csf_a, mta, w, h, buf_stride, buf_stride);
         adm_cm(&csf_r, &cm_r, mta, w, h, buf_stride, buf_stride, buf_stride);
 
-        num_scale += adm_sum_cube(cm_r.band_h, w, h, buf_stride, ADM_BORDER_FACTOR);
-        num_scale += adm_sum_cube(cm_r.band_v, w, h, buf_stride, ADM_BORDER_FACTOR);
-        num_scale += adm_sum_cube(cm_r.band_d, w, h, buf_stride, ADM_BORDER_FACTOR);
+        num_scale += adm_sum_cube(cm_r.band_h, w, h, buf_stride);
+        num_scale += adm_sum_cube(cm_r.band_v, w, h, buf_stride);
+        num_scale += adm_sum_cube(cm_r.band_d, w, h, buf_stride);
 
-        den_scale += adm_sum_cube(csf_o.band_h, w, h, buf_stride, ADM_BORDER_FACTOR);
-        den_scale += adm_sum_cube(csf_o.band_v, w, h, buf_stride, ADM_BORDER_FACTOR);
-        den_scale += adm_sum_cube(csf_o.band_d, w, h, buf_stride, ADM_BORDER_FACTOR);
+        den_scale += adm_sum_cube(csf_o.band_h, w, h, buf_stride);
+        den_scale += adm_sum_cube(csf_o.band_v, w, h, buf_stride);
+        den_scale += adm_sum_cube(csf_o.band_d, w, h, buf_stride);
 
         num += num_scale;
         den += den_scale;

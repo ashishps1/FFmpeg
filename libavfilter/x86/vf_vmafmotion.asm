@@ -55,3 +55,36 @@ cglobal sad, 7, 7, 3, buf1, buf2, w, h, buf1_stride, buf2_stride, x
     paddd           m0, m1
     movd            eax, m0
     RET
+    
+cglobal convolution_x, 11, 11, 3, filter, filt_w, src, dst, w, h, src_stride, dst_stride, radius, border_right, temp
+    mov        eax, filt_wd
+    mov        ecx, 2h
+    div        ecx
+    mov        radiusd, ecx
+    xor        tempq, tempq
+    mov        tempq, filt_wq
+    sub        tempq, radiusq
+    mov        border_rightq, wq
+    sub        border_rightq, tempq
+    pxor       m2, m2
+.loop_h:
+    .loop_b1:
+        pxor           m0, m0
+        .loop_fw1:
+	          
+	jl .loop_fw1
+    jl .loop_b1
+    .loop_b2:
+        pxor           m0, m0
+        .loop_fw2:
+
+	jl .loop_fw2
+    jl .loop_b2
+    .loop_b3:
+        pxor           m0, m0
+        .loop_fw3:
+
+	jl .loop_fw3
+    jl .loop_b3    
+    jl .loop_h
+    RET
