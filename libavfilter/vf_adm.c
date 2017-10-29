@@ -1,5 +1,4 @@
 /*
- * Copyright (c) 2017 Ronald S. Bultje <rsbultje@gmail.com>
  * Copyright (c) 2017 Ashish Pratap Singh <ashk43712@gmail.com>
  *
  * This file is part of FFmpeg.
@@ -164,10 +163,10 @@ static void adm_decouple(const adm_dwt_band_t *ref, const adm_dwt_band_t *main,
     const float cos_1deg_sq = cos(1.0 * M_PI / 180.0) * cos(1.0 * M_PI / 180.0);
     const float eps = 1e-30;
 
-    ptrdiff_t ref_px_stride = ref_stride / sizeof(int16_t);
-    ptrdiff_t main_px_stride = main_stride / sizeof(int16_t);
-    ptrdiff_t r_px_stride = r_stride / sizeof(int16_t);
-    ptrdiff_t a_px_stride = a_stride / sizeof(int16_t);
+    ptrdiff_t ref_px_stride = ref_stride / sizeof(*ref->band_a);
+    ptrdiff_t main_px_stride = main_stride / sizeof(*main->band_a);
+    ptrdiff_t r_px_stride = r_stride / sizeof(*ref->band_a);
+    ptrdiff_t a_px_stride = a_stride / sizeof(*main->band_a);
 
     int oh, ov, od, th, tv, td;
     float kh, kv, kd, tmph, tmpv, tmpd;
@@ -230,10 +229,10 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     const int16_t *src_ptr;
     int16_t *dst_ptr;
 
-    ptrdiff_t src_px_stride = src_stride / sizeof(int16_t);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t);
+    ptrdiff_t src_px_stride = src_stride / sizeof(*src->band_a);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*dst->band_a);
 
-    uint16_t rfactor[3] = {lrint((1.0 / Q[scale][0]) * (1 << BIT_SHIFT)),
+    uint16_t r_factor[3] = {lrint((1.0 / Q[scale][0]) * (1 << BIT_SHIFT)),
         lrint((1.0 / Q[scale][0]) * (1 << BIT_SHIFT)),
         lrint((1.0 / Q[scale][1]) * (1 << BIT_SHIFT))};
 
@@ -245,7 +244,7 @@ static void adm_csf(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
 
         for (i = 0; i < h; i++) {
             for (j = 0; j < w; j++) {
-                dst_ptr[i * dst_px_stride + j] = (rfactor[theta] *
+                dst_ptr[i * dst_px_stride + j] = (r_factor[theta] *
                                                   src_ptr[i * src_px_stride + j]) >> BIT_SHIFT;
             }
         }
@@ -258,8 +257,8 @@ static void adm_cm_thresh(const adm_dwt_band_t *src, int16_t *dst, int w, int h,
     const int16_t *angles[3] = { src->band_h, src->band_v, src->band_d };
     const int16_t *src_ptr;
 
-    ptrdiff_t src_px_stride = src_stride / sizeof(int16_t);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t);
+    ptrdiff_t src_px_stride = src_stride / sizeof(*src->band_h);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*dst);
 
     int filt_coeff, img_coeff;
 
@@ -309,9 +308,9 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
                    const int16_t *thresh, int w, int h, ptrdiff_t src_stride,
                    ptrdiff_t dst_stride, ptrdiff_t thresh_stride)
 {
-    ptrdiff_t src_px_stride = src_stride / sizeof(int16_t);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t);
-    ptrdiff_t thresh_px_stride = thresh_stride / sizeof(int16_t);
+    ptrdiff_t src_px_stride = src_stride / sizeof(*src->band_h);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*src->band_h);
+    ptrdiff_t thresh_px_stride = thresh_stride / sizeof(*thresh);
 
     int xh, xv, xd, thr;
 
@@ -351,7 +350,7 @@ static void adm_cm(const adm_dwt_band_t *src, const adm_dwt_band_t *dst,
     int h = s->height; \
     \
     ptrdiff_t src_px_stride = src_stride / sizeof(type); \
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(int16_t); \
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*dst->band_a); \
     \
     int filt_coeff_lo, filt_coeff_hi, img_coeff; \
     \
@@ -472,7 +471,8 @@ static char *init_dwt_band(adm_dwt_band_t *band, char *data_top, size_t buf_sz)
 double ff_adm_process(ADMData *s, AVFrame *ref, AVFrame *main, double *score,
                       double *score_num, double *score_den, double *scores)
 {
-    double numden_limit = 1e-2 * (s->width * s->height) / (1920.0 * 1080.0);
+    double numden_const = 1e-2 / (1920.0 * 1080.0);;
+    double numden_limit = numden_const * s->width * s->height;
 
     char *data_top;
 
