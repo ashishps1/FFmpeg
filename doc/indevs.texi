@@ -311,6 +311,10 @@ Sets maximum input buffer size in bytes. If the buffering reaches this value,
 incoming frames will be dropped.
 Defaults to @samp{1073741824}.
 
+@item audio_depth
+Sets the audio sample bit depth. Must be @samp{16} or @samp{32}.
+Defaults to @samp{16}.
+
 @end table
 
 @subsection Examples
@@ -332,19 +336,19 @@ ffmpeg -f decklink -list_formats 1 -i 'Intensity Pro'
 @item
 Capture video clip at 1080i50:
 @example
-ffmpeg -format_code Hi50 -f decklink -i 'Intensity Pro' -acodec copy -vcodec copy output.avi
+ffmpeg -format_code Hi50 -f decklink -i 'Intensity Pro' -c:a copy -c:v copy output.avi
 @end example
 
 @item
 Capture video clip at 1080i50 10 bit:
 @example
-ffmpeg -bm_v210 1 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -acodec copy -vcodec copy output.avi
+ffmpeg -bm_v210 1 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -c:a copy -c:v copy output.avi
 @end example
 
 @item
 Capture video clip at 1080i50 with 16 audio channels:
 @example
-ffmpeg -channels 16 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -acodec copy -vcodec copy output.avi
+ffmpeg -channels 16 -format_code Hi50 -f decklink -i 'UltraStudio Mini Recorder' -c:a copy -c:v copy output.avi
 @end example
 
 @end itemize

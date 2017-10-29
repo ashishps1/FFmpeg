@@ -2851,7 +2851,7 @@ so the resulting 20-bit stream will be truncated back to 16-bit. Use something
 like @command{-acodec pcm_s24le} after the filter to get 24-bit PCM output.
 @example
 ffmpeg -i HDCD16.wav -af hdcd OUT16.wav
-ffmpeg -i HDCD16.wav -af hdcd -acodec pcm_s24le OUT24.wav
+ffmpeg -i HDCD16.wav -af hdcd -c:a pcm_s24le OUT24.wav
 @end example
 
 The filter accepts the following options:
@@ -4512,7 +4512,7 @@ Synthesize a voice utterance using the libflite library.
 To enable compilation of this filter you need to configure FFmpeg with
 @code{--enable-libflite}.
 
-Note that the flite library is not thread-safe.
+Note that versions of the flite library prior to 2.0 are not thread-safe.
 
 The filter accepts the following options:
 
@@ -4567,7 +4567,7 @@ ffplay -f lavfi flite=text='No more be grieved for which that thou hast done.'
 @end itemize
 
 For more information about libflite, check:
-@url{http://www.speech.cs.cmu.edu/flite/}
+@url{http://www.festvox.org/flite/}
 
 @section anoisesrc
 
@@ -8669,13 +8669,21 @@ It accepts the following parameters:
 @item fps
 The desired output frame rate. The default is @code{25}.
 
+@item start_time
+Assume the first PTS should be the given value, in seconds. This allows for
+padding/trimming at the start of stream. By default, no assumption is made
+about the first frame's expected PTS, so no padding or trimming is done.
+For example, this could be set to 0 to pad the beginning with duplicates of
+the first frame if a video stream starts after the audio stream or to trim any
+frames with a negative PTS.
+
 @item round
-Rounding method.
+Timestamp (PTS) rounding method.
 
 Possible values are:
 @table @option
 @item zero
-zero round towards 0
+round towards 0
 @item inf
 round away from 0
 @item down
@@ -8687,18 +8695,22 @@ round to nearest
 @end table
 The default is @code{near}.
 
-@item start_time
-Assume the first PTS should be the given value, in seconds. This allows for
-padding/trimming at the start of stream. By default, no assumption is made
-about the first frame's expected PTS, so no padding or trimming is done.
-For example, this could be set to 0 to pad the beginning with duplicates of
-the first frame if a video stream starts after the audio stream or to trim any
-frames with a negative PTS.
+@item eof_action
+Action performed when reading the last frame.
+
+Possible values are:
+@table @option
+@item round
+Use same timestamp rounding method as used for other frames.
+@item pass
+Pass through last frame if input duration has not been reached yet.
+@end table
+The default is @code{round}.
 
 @end table
 
 Alternatively, the options can be specified as a flat string:
-@var{fps}[:@var{round}].
+@var{fps}[:@var{start_time}[:@var{round}]].
 
 See also the @ref{setpts} filter.
 
@@ -11440,6 +11452,9 @@ If not set, the maximum of colors in the palette will be 256. You probably want
 to disable this option for a standalone image.
 Set by default.
 
+@item transparency_color
+Set the color that will be used as background for transparency.
+
 @item stats_mode
 Set statistics mode.
 
@@ -11527,6 +11542,13 @@ Default is @var{none}.
 
 @item new
 Take new palette for each output frame.
+
+@item alpha_threshold
+Sets the alpha threshold for transparency. Alpha values above this threshold
+will be treated as completely opaque, and values below this threshold will be
+treated as completely transparent.
+
+The option must be an integer value in the range [0,255]. Default is @var{128}.
 @end table
 
 @subsection Examples
@@ -11693,7 +11715,8 @@ can be used to test the monowhite pixel format descriptor definition.
 
 @section pixscope
 
-Display sample values of color channels. Mainly useful for checking color and levels.
+Display sample values of color channels. Mainly useful for checking color
+and levels. Minimum supported resolution is 640x480.
 
 The filters accept the following options:
 
@@ -17660,7 +17683,7 @@ with AV_LOG_INFO loglevel.
 
 @itemize
 @item
-Print all metadata values for frames with key @code{lavfi.singnalstats.YDIF} with values
+Print all metadata values for frames with key @code{lavfi.signalstats.YDIF} with values
 between 0 and 1.
 @example
 signalstats,metadata=print:key=lavfi.signalstats.YDIF:value=0:function=expr:expr='between(VALUE1,0,1)'
@@ -17788,7 +17811,7 @@ The PTS of the previously filtered video frame. It's NAN if undefined.
 The PTS of the last previously filtered video frame. It's NAN if undefined.
 
 @item prev_selected_t
-The PTS of the last previously selected video frame. It's NAN if undefined.
+The PTS of the last previously selected video frame, expressed in seconds. It's NAN if undefined.
 
 @item start_pts
 The PTS of the first video frame in the video. It's NAN if undefined.

@@ -1199,24 +1199,6 @@ static void do_video_out(OutputFile *of,
 #endif
         return;
 
-#if FF_API_LAVF_FMT_RAWPICTURE
-    if (of->ctx->oformat->flags & AVFMT_RAWPICTURE &&
-        enc->codec->id == AV_CODEC_ID_RAWVIDEO) {
-        /* raw pictures are written as AVPicture structure to
-           avoid any copies. We support temporarily the older
-           method. */
-        if (in_picture->interlaced_frame)
-            mux_par->field_order = in_picture->top_field_first ? AV_FIELD_TB:AV_FIELD_BT;
-        else
-            mux_par->field_order = AV_FIELD_PROGRESSIVE;
-        pkt.data   = (uint8_t *)in_picture;
-        pkt.size   =  sizeof(AVPicture);
-        pkt.pts    = av_rescale_q(in_picture->pts, enc->time_base, ost->mux_timebase);
-        pkt.flags |= AV_PKT_FLAG_KEY;
-
-        output_packet(of, &pkt, ost, 0);
-    } else
-#endif
     {
         int forced_keyframe = 0;
         double pts_time;
@@ -1897,10 +1879,6 @@ static void flush_encoders(void)
 
         if (enc->codec_type == AVMEDIA_TYPE_AUDIO && enc->frame_size <= 1)
             continue;
-#if FF_API_LAVF_FMT_RAWPICTURE
-        if (enc->codec_type == AVMEDIA_TYPE_VIDEO && (of->ctx->oformat->flags & AVFMT_RAWPICTURE) && enc->codec->id == AV_CODEC_ID_RAWVIDEO)
-            continue;
-#endif
 
         if (enc->codec_type != AVMEDIA_TYPE_VIDEO && enc->codec_type != AVMEDIA_TYPE_AUDIO)
             continue;
@@ -1991,7 +1969,6 @@ static void do_streamcopy(InputStream *ist, OutputStream *ost, const AVPacket *p
     InputFile   *f = input_files [ist->file_index];
     int64_t start_time = (of->start_time == AV_NOPTS_VALUE) ? 0 : of->start_time;
     int64_t ost_tb_start_time = av_rescale_q(start_time, AV_TIME_BASE_Q, ost->mux_timebase);
-    AVPicture pict;
     AVPacket opkt;
 
     av_init_packet(&opkt);
@@ -2078,23 +2055,6 @@ static void do_streamcopy(InputStream *ist, OutputStream *ost, const AVPacket *p
         opkt.size = pkt->size;
     }
     av_copy_packet_side_data(&opkt, pkt);
-
-#if FF_API_LAVF_FMT_RAWPICTURE
-    if (ost->st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO &&
-        ost->st->codecpar->codec_id == AV_CODEC_ID_RAWVIDEO &&
-        (of->ctx->oformat->flags & AVFMT_RAWPICTURE)) {
-        /* store AVPicture in AVPacket, as expected by the output format */
-        int ret = avpicture_fill(&pict, opkt.data, ost->st->codecpar->format, ost->st->codecpar->width, ost->st->codecpar->height);
-        if (ret < 0) {
-            av_log(NULL, AV_LOG_FATAL, "avpicture_fill failed: %s\n",
-                   av_err2str(ret));
-            exit_program(1);
-        }
-        opkt.data = (uint8_t *)&pict;
-        opkt.size = sizeof(AVPicture);
-        opkt.flags |= AV_PKT_FLAG_KEY;
-    }
-#endif
 
     output_packet(of, &opkt, ost, 0);
 }
@@ -2665,8 +2625,13 @@ static int process_input_packet(InputStream *ist, const AVPacket *pkt, int no_eo
                     ist->next_dts = AV_NOPTS_VALUE;
             }
 
-            if (got_output)
-                ist->next_pts += av_rescale_q(duration_pts, ist->st->time_base, AV_TIME_BASE_Q);
+            if (got_output) {
+                if (duration_pts > 0) {
+                    ist->next_pts += av_rescale_q(duration_pts, ist->st->time_base, AV_TIME_BASE_Q);
+                } else {
+                    ist->next_pts += duration_dts;
+                }
+            }
             break;
         case AVMEDIA_TYPE_SUBTITLE:
             if (repeating)
@@ -2909,6 +2874,9 @@ static int init_input_stream(int ist_index, char *error, int error_len)
 
         if (!av_dict_get(ist->decoder_opts, "threads", NULL, 0))
             av_dict_set(&ist->decoder_opts, "threads", "auto", 0);
+        /* Attached pics are sparse, therefore we would not want to delay their decoding till EOF. */
+        if (ist->st->disposition & AV_DISPOSITION_ATTACHED_PIC)
+            av_dict_set(&ist->decoder_opts, "threads", "1", 0);
 
         ret = hw_device_setup_for_decode(ist);
         if (ret < 0) {
@@ -4528,6 +4496,15 @@ static int transcode_step(void)
     }
 
     if (ost->filter && ost->filter->graph->graph) {
+        if (!ost->initialized) {
+            char error[1024] = {0};
+            ret = init_output_stream(ost, error, sizeof(error));
+            if (ret < 0) {
+                av_log(NULL, AV_LOG_ERROR, "Error initializing output stream %d:%d -- %s\n",
+                       ost->file_index, ost->index, error);
+                exit_program(1);
+            }
+        }
         if ((ret = transcode_from_filter(ost->filter->graph, &ist)) < 0)
             return ret;
         if (!ist)

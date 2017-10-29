@@ -352,6 +352,10 @@ concat(){
     fi
 }
 
+null(){
+    :
+}
+
 mkdir -p "$outdir"
 
 # Disable globbing: command arguments may contain globbing characters and
@@ -367,7 +371,7 @@ if [ $err -gt 128 ]; then
     test "${sig}" = "${sig%[!A-Za-z]*}" || unset sig
 fi
 
-if test -e "$ref" || test $cmp = "oneline" || test $cmp = "grep" ; then
+if test -e "$ref" || test $cmp = "oneline" || test $cmp = "null" || test $cmp = "grep" ; then
     case $cmp in
         diff)   diff -u -b "$ref" "$outfile"            >$cmpfile ;;
         rawdiff)diff -u    "$ref" "$outfile"            >$cmpfile ;;

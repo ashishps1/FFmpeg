@@ -39,6 +39,7 @@ extern "C" {
 #include "libavutil/time.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/reverse.h"
+#include "avdevice.h"
 #if CONFIG_LIBZVBI
 #include <libzvbi.h>
 #endif
@@ -138,7 +139,7 @@ static int check_vanc_parity_checksum(uint16_t *buf, int len, uint16_t checksum)
 static void extract_luma_from_v210(uint16_t *dst, const uint8_t *src, int width)
 {
     int i;
-    for (i = 0; i < width / 3; i += 3) {
+    for (i = 0; i < width / 3; i++) {
         *dst++ = (src[1] >> 2) + ((src[2] & 15) << 6);
         *dst++ =  src[4]       + ((src[5] &  3) << 8);
         *dst++ = (src[6] >> 4) + ((src[7] & 63) << 4);
@@ -379,7 +380,7 @@ uint8_t *get_metadata(AVFormatContext *avctx, uint16_t *buf, size_t width,
                 av_log(avctx, AV_LOG_WARNING, "VANC parity or checksum incorrect\n");
                 goto skip_packet;
             }
-            tgt = teletext_data_unit_from_ancillary_packet(buf + 3, buf + len, tgt, cctx->teletext_lines, 0);
+            tgt = teletext_data_unit_from_ancillary_packet(buf + 3, buf + len, tgt, cctx->teletext_lines, 1);
         } else if (did == 0x61 && sdid == 0x01) {
             unsigned int data_len;
             uint8_t *data;
@@ -390,10 +391,8 @@ uint8_t *get_metadata(AVFormatContext *avctx, uint16_t *buf, size_t width,
             clear_parity_bits(buf, len);
             data = vanc_to_cc(avctx, buf, width, data_len);
             if (data) {
-                uint8_t *pkt_cc = av_packet_new_side_data(pkt, AV_PKT_DATA_A53_CC, data_len);
-                if (pkt_cc)
-                    memcpy(pkt_cc, data, data_len);
-                av_free(data);
+                if (av_packet_add_side_data(pkt, AV_PKT_DATA_A53_CC, data, data_len) < 0)
+                    av_free(data);
             }
         } else {
             av_log(avctx, AV_LOG_DEBUG, "Unknown meta data DID = 0x%.2x SDID = 0x%.2x\n",
@@ -452,22 +451,24 @@ static unsigned long long avpacket_queue_size(AVPacketQueue *q)
 static int avpacket_queue_put(AVPacketQueue *q, AVPacket *pkt)
 {
     AVPacketList *pkt1;
+    int ret;
 
     // Drop Packet if queue size is > maximum queue size
     if (avpacket_queue_size(q) > (uint64_t)q->max_q_size) {
         av_log(q->avctx, AV_LOG_WARNING,  "Decklink input buffer overrun!\n");
         return -1;
     }
-    /* duplicate the packet */
-    if (av_dup_packet(pkt) < 0) {
-        return -1;
-    }
 
-    pkt1 = (AVPacketList *)av_malloc(sizeof(AVPacketList));
+    pkt1 = (AVPacketList *)av_mallocz(sizeof(AVPacketList));
     if (!pkt1) {
         return -1;
     }
-    pkt1->pkt  = *pkt;
+    ret = av_packet_ref(&pkt1->pkt, pkt);
+    av_packet_unref(pkt);
+    if (ret < 0) {
+        av_free(pkt1);
+        return -1;
+    }
     pkt1->next = NULL;
 
     pthread_mutex_lock(&q->mutex);
@@ -770,7 +771,7 @@ HRESULT decklink_input_callback::VideoInputFrameArrived(
         av_init_packet(&pkt);
 
         //hack among hacks
-        pkt.size = audioFrame->GetSampleFrameCount() * ctx->audio_st->codecpar->channels * (16 / 8);
+        pkt.size = audioFrame->GetSampleFrameCount() * ctx->audio_st->codecpar->channels * (ctx->audio_depth / 8);
         audioFrame->GetBytes(&audioFrameBytes);
         audioFrame->GetPacketTime(&audio_pts, ctx->audio_st->time_base.den);
         pkt.pts = get_pkt_pts(videoFrame, audioFrame, wallclock, ctx->audio_pts_source, ctx->audio_st->time_base, &initial_audio_pts);
@@ -853,6 +854,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     ctx->audio_pts_source = cctx->audio_pts_source;
     ctx->video_pts_source = cctx->video_pts_source;
     ctx->draw_bars = cctx->draw_bars;
+    ctx->audio_depth = cctx->audio_depth;
     cctx->ctx = ctx;
 
     /* Check audio channel option for valid values: 2, 8 or 16 */
@@ -866,9 +868,19 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
             return AVERROR(EINVAL);
     }
 
+    /* Check audio bit depth option for valid values: 16 or 32 */
+    switch (cctx->audio_depth) {
+        case 16:
+        case 32:
+            break;
+        default:
+            av_log(avctx, AV_LOG_ERROR, "Value for audio bit depth option must be either 16 or 32\n");
+            return AVERROR(EINVAL);
+    }
+
     /* List available devices. */
     if (ctx->list_devices) {
-        ff_decklink_list_devices(avctx);
+        ff_decklink_list_devices_legacy(avctx, 1, 0);
         return AVERROR_EXIT;
     }
 
@@ -929,7 +941,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
         goto error;
     }
     st->codecpar->codec_type  = AVMEDIA_TYPE_AUDIO;
-    st->codecpar->codec_id    = AV_CODEC_ID_PCM_S16LE;
+    st->codecpar->codec_id    = cctx->audio_depth == 32 ? AV_CODEC_ID_PCM_S32LE : AV_CODEC_ID_PCM_S16LE;
     st->codecpar->sample_rate = bmdAudioSampleRate48kHz;
     st->codecpar->channels    = cctx->audio_channels;
     avpriv_set_pts_info(st, 64, 1, 1000000);  /* 64 bits pts in us */
@@ -965,13 +977,13 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     case bmdFormat8BitARGB:
         st->codecpar->codec_id    = AV_CODEC_ID_RAWVIDEO;
         st->codecpar->codec_tag   = avcodec_pix_fmt_to_codec_tag((enum AVPixelFormat)st->codecpar->format);;
-        st->codecpar->format      = AV_PIX_FMT_ARGB;
+        st->codecpar->format      = AV_PIX_FMT_0RGB;
         st->codecpar->bit_rate    = av_rescale(ctx->bmd_width * ctx->bmd_height * 32, st->time_base.den, st->time_base.num);
         break;
     case bmdFormat8BitBGRA:
         st->codecpar->codec_id    = AV_CODEC_ID_RAWVIDEO;
         st->codecpar->codec_tag   = avcodec_pix_fmt_to_codec_tag((enum AVPixelFormat)st->codecpar->format);
-        st->codecpar->format      = AV_PIX_FMT_BGRA;
+        st->codecpar->format      = AV_PIX_FMT_BGR0;
         st->codecpar->bit_rate    = av_rescale(ctx->bmd_width * ctx->bmd_height * 32, st->time_base.den, st->time_base.num);
         break;
     case bmdFormat10BitRGB:
@@ -1020,7 +1032,7 @@ av_cold int ff_decklink_read_header(AVFormatContext *avctx)
     }
 
     av_log(avctx, AV_LOG_VERBOSE, "Using %d input audio channels\n", ctx->audio_st->codecpar->channels);
-    result = ctx->dli->EnableAudioInput(bmdAudioSampleRate48kHz, bmdAudioSampleType16bitInteger, ctx->audio_st->codecpar->channels);
+    result = ctx->dli->EnableAudioInput(bmdAudioSampleRate48kHz, cctx->audio_depth == 32 ? bmdAudioSampleType32bitInteger : bmdAudioSampleType16bitInteger, ctx->audio_st->codecpar->channels);
 
     if (result != S_OK) {
         av_log(avctx, AV_LOG_ERROR, "Cannot enable audio input\n");
@@ -1061,6 +1073,11 @@ int ff_decklink_read_packet(AVFormatContext *avctx, AVPacket *pkt)
     avpacket_queue_get(&ctx->queue, pkt, 1);
 
     return 0;
+}
+
+int ff_decklink_list_input_devices(AVFormatContext *avctx, struct AVDeviceInfoList *device_list)
+{
+    return ff_decklink_list_devices(avctx, device_list, 1, 0);
 }
 
 } /* extern "C" */

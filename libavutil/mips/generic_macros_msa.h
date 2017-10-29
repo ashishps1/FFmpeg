@@ -1088,6 +1088,25 @@
     out_m;                                                \
 } )
 
+#define CLIP_SW_0_255_MAX_SATU(in)                    \
+( {                                                   \
+    v4i32 out_m;                                      \
+                                                      \
+    out_m = __msa_maxi_s_w((v4i32) in, 0);            \
+    out_m = (v4i32) __msa_sat_u_w((v4u32) out_m, 7);  \
+    out_m;                                            \
+} )
+#define CLIP_SW2_0_255_MAX_SATU(in0, in1)  \
+{                                          \
+    in0 = CLIP_SW_0_255_MAX_SATU(in0);     \
+    in1 = CLIP_SW_0_255_MAX_SATU(in1);     \
+}
+#define CLIP_SW4_0_255_MAX_SATU(in0, in1, in2, in3)  \
+{                                                    \
+    CLIP_SW2_0_255_MAX_SATU(in0, in1);               \
+    CLIP_SW2_0_255_MAX_SATU(in2, in3);               \
+}
+
 /* Description : Addition of 4 signed word elements
                  4 signed word elements of input vector are added together and
                  resulted integer sum is returned
@@ -1252,6 +1271,7 @@
 }
 #define INSERT_W4_UB(...) INSERT_W4(v16u8, __VA_ARGS__)
 #define INSERT_W4_SB(...) INSERT_W4(v16i8, __VA_ARGS__)
+#define INSERT_W4_SH(...) INSERT_W4(v8i16, __VA_ARGS__)
 #define INSERT_W4_SW(...) INSERT_W4(v4i32, __VA_ARGS__)
 
 /* Description : Insert specified double word elements from input vectors to 1
@@ -1267,6 +1287,7 @@
 }
 #define INSERT_D2_UB(...) INSERT_D2(v16u8, __VA_ARGS__)
 #define INSERT_D2_SB(...) INSERT_D2(v16i8, __VA_ARGS__)
+#define INSERT_D2_SH(...) INSERT_D2(v8i16, __VA_ARGS__)
 #define INSERT_D2_SD(...) INSERT_D2(v2i64, __VA_ARGS__)
 
 /* Description : Interleave even byte elements from vectors
@@ -1444,6 +1465,7 @@
     out2 = (RTYPE) __msa_ilvr_b((v16i8) in4, (v16i8) in5);              \
 }
 #define ILVR_B3_UB(...) ILVR_B3(v16u8, __VA_ARGS__)
+#define ILVR_B3_SB(...) ILVR_B3(v16i8, __VA_ARGS__)
 #define ILVR_B3_UH(...) ILVR_B3(v8u16, __VA_ARGS__)
 #define ILVR_B3_SH(...) ILVR_B3(v8i16, __VA_ARGS__)
 
@@ -1974,6 +1996,7 @@
     XORI_B4_128(RTYPE, in4, in5, in6, in7);                         \
 }
 #define XORI_B8_128_SB(...) XORI_B8_128(v16i8, __VA_ARGS__)
+#define XORI_B8_128_UB(...) XORI_B8_128(v16u8, __VA_ARGS__)
 
 /* Description : Addition of signed halfword elements and signed saturation
    Arguments   : Inputs  - in0, in1, in2, in3
@@ -2238,6 +2261,22 @@
     out1 = in2 - in3;                                                         \
     out2 = in4 - in5;                                                         \
     out3 = in6 - in7;                                                         \
+}
+
+/* Description : Sign extend byte elements from right half of the vector
+   Arguments   : Input  - in    (byte vector)
+                 Output - out   (sign extended halfword vector)
+                 Return Type - signed halfword
+   Details     : Sign bit of byte elements from input vector 'in' is
+                 extracted and interleaved with same vector 'in' to generate
+                 8 halfword elements keeping sign intact
+*/
+#define UNPCK_R_SB_SH(in, out)                       \
+{                                                    \
+    v16i8 sign_m;                                    \
+                                                     \
+    sign_m = __msa_clti_s_b((v16i8) in, 0);          \
+    out = (v8i16) __msa_ilvr_b(sign_m, (v16i8) in);  \
 }
 
 /* Description : Sign extend halfword elements from right half of the vector
