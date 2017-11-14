@@ -24,21 +24,21 @@
  * @file
  * Calculate VIF between two input videos.
  */
-/*
+
 #include "libavutil/avstring.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avfilter.h"
-#include "dualinput.h"
 #include "drawutils.h"
 #include "formats.h"
+#include "framesync.h"
 #include "internal.h"
 #include "vif.h"
 #include "video.h"
 
 typedef struct VIFContext {
     const AVClass *class;
-    FFDualInputContext dinput;
+    FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
     int vif_filter[4][17];
     int width;
@@ -58,7 +58,7 @@ static const AVOption vif_options[] = {
     { NULL }
 };
 
-AVFILTER_DEFINE_CLASS(vif);
+FRAMESYNC_DEFINE_CLASS(vif, VIFContext, fs);
 
 static void vif_dec2(const uint64_t *src, uint64_t *dst, int src_w, int src_h,
                      ptrdiff_t src_stride, ptrdiff_t dst_stride)
@@ -184,7 +184,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
         } \
     } \
 }
-*/
+
 #define vif_filter1d_fn(type, bits) \
     static void vif_filter1d_##bits##bit(const int *filter, const type *src, uint64_t *dst, \
                                          uint64_t *temp_buf, int w, int h, ptrdiff_t src_stride, \
@@ -229,7 +229,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
         } \
     } \
 }
-/*
+
 vif_filter1d_fn(uint8_t, 8);
 vif_filter1d_fn(uint16_t, 16);
 vif_filter1d_fn(uint64_t, 64);
@@ -432,10 +432,21 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata, key, value, 0);
 }
 
-static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
+static AVFrame *do_vif(FFFrameSync *fs)
 {
+    AVFilterContext *ctx = fs->parent;
     VIFContext *s = ctx->priv;
-    AVDictionary **metadata = &main->metadata;
+    AVFrame *master, *ref;
+    
+    int ret;
+    AVDictionary **metadata;
+
+    ret = ff_framesync_dualinput_get(fs, &master, &ref);
+    if (ret < 0)
+        return ret;
+    if (!ref)
+        return ff_filter_frame(ctx->outputs[0], master);
+    metadata = &master->metadata;
 
     double score = 0.0;
     double score_num = 0.0;
@@ -446,9 +457,9 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
     int h = s->height;
 
     ptrdiff_t ref_stride = ref->linesize[0];
-    ptrdiff_t main_stride = main->linesize[0];
+    ptrdiff_t main_stride = master->linesize[0];
 
-    compute_vif2(s->vif_filter, ref->data[0], main->data[0], w, h, ref_stride,
+    compute_vif2(s->vif_filter, ref->data[0], master->data[0], w, h, ref_stride,
                  main_stride, &score, &score_num, &score_den, scores,
                  s->data_buf, s->temp, s->desc->comp[0].depth);
     set_meta(metadata, "lavfi.vif.score", score);
@@ -457,7 +468,7 @@ static AVFrame *do_vif(AVFilterContext *ctx, AVFrame *main, const AVFrame *ref)
 
     s->vif_sum += score;
 
-    return main;
+    return master;
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -471,7 +482,7 @@ static av_cold int init(AVFilterContext *ctx)
         }
     }
 
-    s->dinput.process = do_vif;
+    s->fs.on_event = do_vif;
 
     return 0;
 }
@@ -537,28 +548,25 @@ static int config_output(AVFilterLink *outlink)
     VIFContext *s = ctx->priv;
     AVFilterLink *mainlink = ctx->inputs[0];
     int ret;
-
+    
+    ret = ff_framesync_init_dualinput(&s->fs, ctx);
+    if (ret < 0)
+        return ret;
     outlink->w = mainlink->w;
     outlink->h = mainlink->h;
     outlink->time_base = mainlink->time_base;
     outlink->sample_aspect_ratio = mainlink->sample_aspect_ratio;
     outlink->frame_rate = mainlink->frame_rate;
-    if ((ret = ff_dualinput_init(ctx, &s->dinput)) < 0)
+    if ((ret = ff_framesync_configure(&s->fs)) < 0)
         return ret;
 
     return 0;
 }
 
-static int filter_frame(AVFilterLink *inlink, AVFrame *inpicref)
+static int activate(AVFilterContext *ctx)
 {
-    VIFContext *s = inlink->dst->priv;
-    return ff_dualinput_filter_frame(&s->dinput, inlink, inpicref);
-}
-
-static int request_frame(AVFilterLink *outlink)
-{
-    VIFContext *s = outlink->src->priv;
-    return ff_dualinput_request_frame(&s->dinput, outlink);
+    VIFContext *s = ctx->priv;
+    return ff_framesync_activate(&s->fs);
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
@@ -572,18 +580,16 @@ static av_cold void uninit(AVFilterContext *ctx)
     av_free(s->data_buf);
     av_free(s->temp);
 
-    ff_dualinput_uninit(&s->dinput);
+    ff_framesync_uninit(&s->fs);
 }
 
 static const AVFilterPad vif_inputs[] = {
     {
         .name         = "main",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
     },{
         .name         = "reference",
         .type         = AVMEDIA_TYPE_VIDEO,
-        .filter_frame = filter_frame,
         .config_props = config_input_ref,
     },
     { NULL }
@@ -594,7 +600,6 @@ static const AVFilterPad vif_outputs[] = {
         .name          = "default",
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = config_output,
-        .request_frame = request_frame,
     },
     { NULL }
 };
@@ -602,11 +607,13 @@ static const AVFilterPad vif_outputs[] = {
 AVFilter ff_vf_vif = {
     .name          = "vif",
     .description   = NULL_IF_CONFIG_SMALL("Calculate the VIF between two video streams."),
+    .preinit       = vif_framesync_preinit,    
     .init          = init,
     .uninit        = uninit,
     .query_formats = query_formats,
+    .activate      = activate,
     .priv_size     = sizeof(VIFContext),
     .priv_class    = &vif_class,
     .inputs        = vif_inputs,
     .outputs       = vif_outputs,
-};*/
+};

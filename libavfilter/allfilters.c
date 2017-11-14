@@ -343,6 +343,7 @@ static void register_all(void)
     REGISTER_FILTER(VFLIP,          vflip,          vf);
     REGISTER_FILTER(VIDSTABDETECT,  vidstabdetect,  vf);
     REGISTER_FILTER(VIDSTABTRANSFORM, vidstabtransform, vf);
+    REGISTER_FILTER(VIF,            vif,            vf);
     REGISTER_FILTER(VIGNETTE,       vignette,       vf);
     REGISTER_FILTER(VMAFMOTION,     vmafmotion,     vf);
     REGISTER_FILTER(VPP_QSV,        vpp_qsv,        vf);
