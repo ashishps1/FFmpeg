@@ -36,10 +36,29 @@
 #include "vif.h"
 #include "video.h"
 
+#define BIT_SHIFT 15
+#define SIGMA_NSQ 2
+#define SIGMA_MAX_INV 4.0 / (255.0 * 255.0);
+
+static const int vif_filter_width[4] = { 17, 9, 5, 3 };
+
+static const float vif_filter_table[4][17] = {
+    { 0.00745626912, 0.0142655009, 0.0250313189, 0.0402820669, 0.0594526194,
+      0.0804751068,  0.0999041125, 0.113746084,  0.118773937,  0.113746084,
+      0.0999041125,  0.0804751068, 0.0594526194, 0.0402820669, 0.0250313189,
+      0.0142655009,  0.00745626912 },
+    { 0.0189780835,  0.0558981746, 0.120920904,  0.192116052, 0.224173605,
+      0.192116052,   0.120920904,  0.0558981746, 0.0189780835 },
+    { 0.054488685,   0.244201347,  0.402619958,  0.244201347, 0.054488685 },
+    { 0.166378498,   0.667243004,  0.166378498 }
+};
+
 typedef struct VIFContext {
     const AVClass *class;
     FFFrameSync fs;
     const AVPixFmtDescriptor *desc;
+    FILE *stats_file;
+    char *stats_file_str;    
     int vif_filter[4][17];
     int width;
     int height;
@@ -50,11 +69,14 @@ typedef struct VIFContext {
 } VIFContext;
 
 #define OFFSET(x) offsetof(VIFContext, x)
+#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
+
 #define MAX_ALIGN 32
 #define ALIGN_CEIL(x) ((x) + ((x) % MAX_ALIGN ? MAX_ALIGN - (x) % MAX_ALIGN : 0))
 #define OPT_RANGE_PIXEL_OFFSET (-128)
 
 static const AVOption vif_options[] = {
+    {"stats_file", "Set file where to store per-frame difference information", OFFSET(stats_file_str), AV_OPT_TYPE_STRING, {.str=NULL}, 0, 0, FLAGS },
     { NULL }
 };
 
@@ -63,8 +85,8 @@ FRAMESYNC_DEFINE_CLASS(vif, VIFContext, fs);
 static void vif_dec2(const uint64_t *src, uint64_t *dst, int src_w, int src_h,
                      ptrdiff_t src_stride, ptrdiff_t dst_stride)
 {
-    ptrdiff_t src_px_stride = src_stride / sizeof(uint64_t);
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(uint64_t);
+    ptrdiff_t src_px_stride = src_stride / sizeof(*src);
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*dst);
 
     int i, j;
 
@@ -77,7 +99,7 @@ static void vif_dec2(const uint64_t *src, uint64_t *dst, int src_w, int src_h,
 
 static int vif_sum(const uint64_t *x, int w, int h, ptrdiff_t stride)
 {
-    ptrdiff_t px_stride = stride / sizeof(uint64_t);
+    ptrdiff_t px_stride = stride / sizeof(*x);
     int i, j;
 
     int sum = 0;
@@ -104,17 +126,14 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
                           ptrdiff_t yy_filt_stride, ptrdiff_t xy_filt_stride,
                           ptrdiff_t num_stride, ptrdiff_t den_stride)
 {
-    static const float sigma_nsq = 2;
-    static const float sigma_max_inv = 4.0 / (255.0 * 255.0);
-
-    ptrdiff_t mu1_sq_px_stride  = mu1_sq_stride / sizeof(uint64_t);
-    ptrdiff_t mu2_sq_px_stride  = mu2_sq_stride / sizeof(uint64_t);
-    ptrdiff_t mu1_mu2_px_stride = mu1_mu2_stride / sizeof(uint64_t);
-    ptrdiff_t xx_filt_px_stride = xx_filt_stride / sizeof(uint64_t);
-    ptrdiff_t yy_filt_px_stride = yy_filt_stride / sizeof(uint64_t);
-    ptrdiff_t xy_filt_px_stride = xy_filt_stride / sizeof(uint64_t);
-    ptrdiff_t num_px_stride = num_stride / sizeof(uint64_t);
-    ptrdiff_t den_px_stride = den_stride / sizeof(uint64_t);
+    ptrdiff_t mu1_sq_px_stride  = mu1_sq_stride / sizeof(*mu1_sq);
+    ptrdiff_t mu2_sq_px_stride  = mu2_sq_stride / sizeof(*mu2_sq);
+    ptrdiff_t mu1_mu2_px_stride = mu1_mu2_stride / sizeof(*mu1_mu2);
+    ptrdiff_t xx_filt_px_stride = xx_filt_stride / sizeof(*xx_filt);
+    ptrdiff_t yy_filt_px_stride = yy_filt_stride / sizeof(*yy_filt);
+    ptrdiff_t xy_filt_px_stride = xy_filt_stride / sizeof(*xy_filt);
+    ptrdiff_t num_px_stride = num_stride / sizeof(*num);
+    ptrdiff_t den_px_stride = den_stride / sizeof(*den);
 
     float mu1_sq_val, mu2_sq_val, mu1_mu2_val, xx_filt_val, yy_filt_val, xy_filt_val;
     float sigma1_sq, sigma2_sq, sigma12, g, sv_sq;
@@ -134,20 +153,26 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
             sigma2_sq = yy_filt_val - mu2_sq_val;
             sigma12 = xy_filt_val - mu1_mu2_val;
 
-            if (sigma1_sq < sigma_nsq) {
-                num_val = 1.0 - sigma2_sq * sigma_max_inv;
+            if (sigma1_sq < SIGMA_NSQ) {
+                num_val = 1.0 - sigma2_sq * SIGMA_MAX_INV;
                 den_val = 1.0;
             } else {
-                sv_sq = (sigma2_sq + sigma_nsq) * sigma1_sq;
+                sv_sq = (sigma2_sq + SIGMA_NSQ) * sigma1_sq;
                 if( sigma12 < 0 ) {
                     num_val = 0.0;
                 } else {
                     g = sv_sq - sigma12 * sigma12;
-                    num_val = log2f(1.0 + sv_sq / g);
+                    if((1.0 + sv_sq / g) < 0) {
+                        num_val = 0.0;
+                    }
+                    else {
+                        num_val = log2f(1.0 + sv_sq / g);
+                    }
+                    //printf("%f\n",1.0 + sv_sq / g);                    
                 }
-                den_val = log2f(1.0 + sigma1_sq / sigma_nsq);
+                den_val = log2f(1.0 + sigma1_sq / SIGMA_NSQ);
             }
-
+            //printf("%f %f\n",num_val, den_val);
             num[i * num_px_stride + j] = num_val;
             den[i * den_px_stride + j] = den_val;
         }
@@ -161,9 +186,9 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
 { \
     ptrdiff_t x_px_stride = xstride / sizeof(type); \
     ptrdiff_t y_px_stride = ystride / sizeof(type); \
-    ptrdiff_t xx_px_stride = xxstride / sizeof(uint64_t); \
-    ptrdiff_t yy_px_stride = yystride / sizeof(uint64_t); \
-    ptrdiff_t xy_px_stride = xystride / sizeof(uint64_t); \
+    ptrdiff_t xx_px_stride = xxstride / sizeof(*xx); \
+    ptrdiff_t yy_px_stride = yystride / sizeof(*yy); \
+    ptrdiff_t xy_px_stride = xystride / sizeof(*xy); \
     \
     int i, j; \
     \
@@ -191,7 +216,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
                                          ptrdiff_t dst_stride, int filt_w, uint64_t *temp) \
 { \
     ptrdiff_t src_px_stride = src_stride / sizeof(type); \
-    ptrdiff_t dst_px_stride = dst_stride / sizeof(uint64_t); \
+    ptrdiff_t dst_px_stride = dst_stride / sizeof(*dst); \
     \
     int i, j, filt_i, filt_j, ii, jj; \
     \
@@ -209,7 +234,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
                 \
                 sum += filter[filt_i] * src[ii * src_px_stride + j]; \
             } \
-            temp[j] = sum >> N; \
+            temp[j] = sum >> BIT_SHIFT; \
         } \
         \
         /** Horizontal pass. */ \
@@ -225,7 +250,7 @@ static void vif_statistic(const uint64_t *mu1_sq, const uint64_t *mu2_sq,
                 \
                 sum += filter[filt_j] * temp[jj]; \
             } \
-            dst[i * dst_px_stride + j] = sum >> N; \
+            dst[i * dst_px_stride + j] = sum >> BIT_SHIFT; \
         } \
     } \
 }
@@ -419,7 +444,7 @@ int compute_vif2(const int vif_filter[4][17], const void *ref, const void *main,
     } else {
         *score = (*score_num) / (*score_den);
     }
-
+    printf("%f\n",*score);
     ret = 0;
 
     return ret;
@@ -432,7 +457,7 @@ static void set_meta(AVDictionary **metadata, const char *key, float d)
     av_dict_set(metadata, key, value, 0);
 }
 
-static AVFrame *do_vif(FFFrameSync *fs)
+static int do_vif(FFFrameSync *fs)
 {
     AVFilterContext *ctx = fs->parent;
     VIFContext *s = ctx->priv;
@@ -440,6 +465,11 @@ static AVFrame *do_vif(FFFrameSync *fs)
     
     int ret;
     AVDictionary **metadata;
+    
+    double score = 0.0;
+    double score_num = 0.0;
+    double score_den = 0.0;
+    double scores[8];    
 
     ret = ff_framesync_dualinput_get(fs, &master, &ref);
     if (ret < 0)
@@ -448,27 +478,21 @@ static AVFrame *do_vif(FFFrameSync *fs)
         return ff_filter_frame(ctx->outputs[0], master);
     metadata = &master->metadata;
 
-    double score = 0.0;
-    double score_num = 0.0;
-    double score_den = 0.0;
-    double scores[8];
-
-    int w = s->width;
-    int h = s->height;
-
-    ptrdiff_t ref_stride = ref->linesize[0];
-    ptrdiff_t main_stride = master->linesize[0];
-
-    compute_vif2(s->vif_filter, ref->data[0], master->data[0], w, h, ref_stride,
-                 main_stride, &score, &score_num, &score_den, scores,
+    compute_vif2(s->vif_filter, ref->data[0], master->data[0], s->width, s->height, ref->linesize[0],
+                 master->linesize[0], &score, &score_num, &score_den, scores,
                  s->data_buf, s->temp, s->desc->comp[0].depth);
     set_meta(metadata, "lavfi.vif.score", score);
+
+    if (s->stats_file) {
+        fprintf(s->stats_file,
+                "n:%"PRId64" vif:%0.2lf\n", s->nb_frames, score);
+    }
 
     s->nb_frames++;
 
     s->vif_sum += score;
 
-    return master;
+    return ff_filter_frame(ctx->outputs[0], master);;
 }
 
 static av_cold int init(AVFilterContext *ctx)
@@ -478,7 +502,23 @@ static av_cold int init(AVFilterContext *ctx)
     int i,j;
     for(i = 0; i < 4; i++) {
         for(j = 0; j < vif_filter_width[i]; j++){
-            s->vif_filter[i][j] = lrint(vif_filter_table[i][j] * (1 << N));
+            s->vif_filter[i][j] = lrint(vif_filter_table[i][j] * (1 << BIT_SHIFT));
+        }
+    }
+
+    if (s->stats_file_str) {
+        if (!strcmp(s->stats_file_str, "-")) {
+            s->stats_file = stdout;
+        } else {
+            s->stats_file = fopen(s->stats_file_str, "w");
+            if (!s->stats_file) {
+                int err = AVERROR(errno);
+                char buf[128];
+                av_strerror(err, buf, sizeof(buf));
+                av_log(ctx, AV_LOG_ERROR, "Could not open stats file %s: %s\n",
+                       s->stats_file_str, buf);
+                return err;
+            }
         }
     }
 
@@ -576,6 +616,9 @@ static av_cold void uninit(AVFilterContext *ctx)
     if (s->nb_frames > 0) {
         av_log(ctx, AV_LOG_INFO, "VIF AVG: %.3f\n", s->vif_sum / s->nb_frames);
     }
+
+    if (s->stats_file && s->stats_file != stdout)
+        fclose(s->stats_file);
 
     av_free(s->data_buf);
     av_free(s->temp);

@@ -621,7 +621,7 @@ static int do_adm(FFFrameSync *fs)
     AVFilterContext *ctx = fs->parent;
     ADMContext *admctx = ctx->priv;
     ADMData *s = &admctx->data;
-    AVFrame *main, *ref;
+    AVFrame *master, *ref;
     int ret;
     AVDictionary **metadata;
 
@@ -630,26 +630,26 @@ static int do_adm(FFFrameSync *fs)
     double score_den = 0;
     double scores[2 * 4];
 
-    ret = ff_framesync_dualinput_get(fs, &main, &ref);
+    ret = ff_framesync_dualinput_get(fs, &master, &ref);
     if (ret < 0)
         return ret;
     if (!ref)
-        return ff_filter_frame(ctx->outputs[0], main);
-    metadata = &main->metadata;
+        return ff_filter_frame(ctx->outputs[0], master);
+    metadata = &master->metadata;
 
-    score = ff_adm_process(s, ref, main, &score, &score_num, &score_den, scores);
+    score = ff_adm_process(s, ref, master, &score, &score_num, &score_den, scores);
 
     set_meta(metadata, "lavfi.adm.score", score);
     if (admctx->stats_file) {
         fprintf(admctx->stats_file,
-                "n:%"PRId64" vif:%0.2lf\n", s->nb_frames, score);
+                "n:%"PRId64" adm:%0.2lf\n", s->nb_frames, score);
     }
 
     s->nb_frames++;
 
     s->adm_sum += score;
 
-    return ff_filter_frame(ctx->outputs[0], main);
+    return ff_filter_frame(ctx->outputs[0], master);
 }
 
 static av_cold int init(AVFilterContext *ctx)
